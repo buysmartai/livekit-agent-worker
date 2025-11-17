@@ -17,7 +17,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY agent.py .
-COPY .env .
 
 # 创建非 root 用户
 RUN useradd -m -u 1000 livekit && chown -R livekit:livekit /app
