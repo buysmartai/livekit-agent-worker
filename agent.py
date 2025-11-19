@@ -66,7 +66,7 @@ async def entrypoint(ctx: JobContext):
         # 语音合成 (TTS) - 使用 ElevenLabs TTS
         tts=elevenlabs.TTS(
             voice_id="tQ4MEZFJOzsahSEEZtHK",
-            model="eleven_turbo_v2_5",
+            model="eleven_ttv_v3",
             voice_settings=VoiceSettings(
                 stability=0.5,              # 稳定性 (0.0-1.0)
                 similarity_boost=0.75,      # 相似度 (0.0-1.0)
