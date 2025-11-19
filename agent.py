@@ -26,6 +26,7 @@ from livekit.agents import (
 from livekit.plugins import aliyun
 from livekit.plugins import elevenlabs
 from livekit.plugins.elevenlabs import VoiceSettings
+from livekit.plugins import minimax
 
 # 配置日志
 logging.basicConfig(
@@ -63,16 +64,20 @@ async def entrypoint(ctx: JobContext):
             # vocabulary_id="your_vocabulary_id",  # 可选：热词表 ID，提高特定词汇识别准确率
         ),
         
-        # 语音合成 (TTS) - 使用 ElevenLabs TTS
-        tts=elevenlabs.TTS(
-            voice_id="tQ4MEZFJOzsahSEEZtHK",
-            model="eleven_turbo_v2_5",
-            voice_settings=VoiceSettings(
-                stability=0.5,              # 稳定性 (0.0-1.0)
-                similarity_boost=0.75,      # 相似度 (0.0-1.0)
-                speed=1.2,                  # 语速 (0.8-1.2) - 设置为最快
-                use_speaker_boost=True      # 使用说话人增强
-            ),
+        # # 语音合成 (TTS) - 使用 ElevenLabs TTS
+        # tts=elevenlabs.TTS(
+        #     voice_id="tQ4MEZFJOzsahSEEZtHK",
+        #     model="eleven_turbo_v2_5",
+        #     voice_settings=VoiceSettings(
+        #         stability=0.5,              # 稳定性 (0.0-1.0)
+        #         similarity_boost=0.75,      # 相似度 (0.0-1.0)
+        #         speed=1.2,                  # 语速 (0.8-1.2) - 设置为最快
+        #         use_speaker_boost=True      # 使用说话人增强
+        #     ),
+        # ),
+        tts=minimax.TTS(
+            voice_id="male-qn-qingse",
+            model="speech-01-turbo",
         ),
         
         # 大语言模型 (LLM) - 使用阿里云 Qwen 系列模型

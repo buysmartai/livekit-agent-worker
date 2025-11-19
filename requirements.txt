@@ -1,5 +1,7 @@
 # LiveKit Agent 核心依赖
 livekit-agents[elevenlabs]>=1.2.9
+# minimax 插件
+livekit-plugins-minimax>=1.2.9
 
 # 阿里云插件
 livekit-plugins-aliyun>=1.2.9
