@@ -65,22 +65,22 @@ async def entrypoint(ctx: JobContext):
         ),
         
         # # 语音合成 (TTS) - 使用 ElevenLabs TTS
-        # tts=elevenlabs.TTS(
-        #     voice_id="tQ4MEZFJOzsahSEEZtHK",
-        #     model="eleven_turbo_v2_5",
-        #     voice_settings=VoiceSettings(
-        #         stability=0.5,              # 稳定性 (0.0-1.0)
-        #         similarity_boost=0.75,      # 相似度 (0.0-1.0)
-        #         speed=1.2,                  # 语速 (0.8-1.2) - 设置为最快
-        #         use_speaker_boost=True      # 使用说话人增强
-        #     ),
-        # ),
-        tts=minimax.TTS(
-            api_key="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJMaWZlaSBDaGVuIiwiVXNlck5hbWUiOiJMaWZlaSBDaGVuIiwiQWNjb3VudCI6IiIsIlN1YmplY3RJRCI6IjE4NTk4NTQ4NzQ2NzQ0NjcxMzgiLCJQaG9uZSI6IiIsIkdyb3VwSUQiOiIxODU5ODU0ODc0NjY2MDc4NTMwIiwiUGFnZU5hbWUiOiIiLCJNYWlsIjoiY2xmaGFoYTEyMzRAZ21haWwuY29tIiwiQ3JlYXRlVGltZSI6IjIwMjQtMTEtMjQgMTM6NDM6NDYiLCJUb2tlblR5cGUiOjEsImlzcyI6Im1pbmltYXgifQ.Gh5g6lkmKXEcQ68NLkNXi0wghdeeQ0-_bIwgxSrDi8fiakXm_m4c9t0U-IQgLWn48TqO2cEkN-a_yLGszqofCg4sigacZA97w2_53pc6ZDOCFSUytwZW-A_VKmuUhBYRmmflHaBiJWhMc4Nk2ZglYBKDv0fNZhLlwajHx-YwVoQagGkO4-8VpO5-qqcuN1Zt_1EkWvSITckEdfp9RzDhdWZnKjiI-QVrMFA2CCsDDhO18SJgYeLVapEKTjAxO8BCfHfzlBzZAmeLLztwdU1kI4l_5dz5K1Qb06JeZN8eDESKL_16HxJVVxSAk4rSpypJ9Jd1bM2WaqUxD1sE0nlsGA",
-            group_id="1859854874666078530",
-            voice_id="male-qn-qingse",
-            model="speech-01-turbo",
+        tts=elevenlabs.TTS(
+            voice_id="tQ4MEZFJOzsahSEEZtHK",
+            model="eleven_turbo_v2_5",
+            voice_settings=VoiceSettings(
+                stability=0.5,              # 稳定性 (0.0-1.0)
+                similarity_boost=0.75,      # 相似度 (0.0-1.0)
+                speed=1.2,                  # 语速 (0.8-1.2) - 设置为最快
+                use_speaker_boost=True      # 使用说话人增强
+            ),
         ),
+        # tts=minimax.TTS(
+        #     api_key="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJMaWZlaSBDaGVuIiwiVXNlck5hbWUiOiJMaWZlaSBDaGVuIiwiQWNjb3VudCI6IiIsIlN1YmplY3RJRCI6IjE4NTk4NTQ4NzQ2NzQ0NjcxMzgiLCJQaG9uZSI6IiIsIkdyb3VwSUQiOiIxODU5ODU0ODc0NjY2MDc4NTMwIiwiUGFnZU5hbWUiOiIiLCJNYWlsIjoiY2xmaGFoYTEyMzRAZ21haWwuY29tIiwiQ3JlYXRlVGltZSI6IjIwMjQtMTEtMjQgMTM6NDM6NDYiLCJUb2tlblR5cGUiOjEsImlzcyI6Im1pbmltYXgifQ.Gh5g6lkmKXEcQ68NLkNXi0wghdeeQ0-_bIwgxSrDi8fiakXm_m4c9t0U-IQgLWn48TqO2cEkN-a_yLGszqofCg4sigacZA97w2_53pc6ZDOCFSUytwZW-A_VKmuUhBYRmmflHaBiJWhMc4Nk2ZglYBKDv0fNZhLlwajHx-YwVoQagGkO4-8VpO5-qqcuN1Zt_1EkWvSITckEdfp9RzDhdWZnKjiI-QVrMFA2CCsDDhO18SJgYeLVapEKTjAxO8BCfHfzlBzZAmeLLztwdU1kI4l_5dz5K1Qb06JeZN8eDESKL_16HxJVVxSAk4rSpypJ9Jd1bM2WaqUxD1sE0nlsGA",
+        #     group_id="1859854874666078530",
+        #     voice_id="male-qn-qingse",
+        #     model="speech-01-turbo",
+        # ),
         
         # 大语言模型 (LLM) - 使用阿里云 Qwen 系列模型
         llm=aliyun.LLM(
