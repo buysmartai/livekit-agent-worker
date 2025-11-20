@@ -44,7 +44,7 @@ async def entrypoint(ctx: JobContext):
     当 LiveKit 房间创建或 Agent 被调用时，该函数会被执行。
     """
     logger.info(f"连接到房间: {ctx.room.name}")
-    
+
     # 创建 Agent 实例
     # instructions 参数定义了助手的行为和角色
     agent = Agent(
@@ -55,7 +55,7 @@ async def entrypoint(ctx: JobContext):
             "如果遇到不确定的问题，请诚实地告知用户。"
         )
     )
-    
+
     # 创建 Agent 会话，配置语音和语言模型组件
     session = AgentSession(
         # 语音识别 (STT) - 使用阿里云 Paraformer 实时语音识别
@@ -63,7 +63,7 @@ async def entrypoint(ctx: JobContext):
             model="paraformer-realtime-v2",  # 实时语音识别模型
             # vocabulary_id="your_vocabulary_id",  # 可选：热词表 ID，提高特定词汇识别准确率
         ),
-        
+
         # # 语音合成 (TTS) - 使用 ElevenLabs TTS
         tts=elevenlabs.TTS(
             voice_id="tQ4MEZFJOzsahSEEZtHK",
@@ -76,12 +76,17 @@ async def entrypoint(ctx: JobContext):
             ),
         ),
         # tts=minimax.TTS(
-        #     api_key="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiJMaWZlaSBDaGVuIiwiVXNlck5hbWUiOiJMaWZlaSBDaGVuIiwiQWNjb3VudCI6IiIsIlN1YmplY3RJRCI6IjE4NTk4NTQ4NzQ2NzQ0NjcxMzgiLCJQaG9uZSI6IiIsIkdyb3VwSUQiOiIxODU5ODU0ODc0NjY2MDc4NTMwIiwiUGFnZU5hbWUiOiIiLCJNYWlsIjoiY2xmaGFoYTEyMzRAZ21haWwuY29tIiwiQ3JlYXRlVGltZSI6IjIwMjQtMTEtMjQgMTM6NDM6NDYiLCJUb2tlblR5cGUiOjEsImlzcyI6Im1pbmltYXgifQ.Gh5g6lkmKXEcQ68NLkNXi0wghdeeQ0-_bIwgxSrDi8fiakXm_m4c9t0U-IQgLWn48TqO2cEkN-a_yLGszqofCg4sigacZA97w2_53pc6ZDOCFSUytwZW-A_VKmuUhBYRmmflHaBiJWhMc4Nk2ZglYBKDv0fNZhLlwajHx-YwVoQagGkO4-8VpO5-qqcuN1Zt_1EkWvSITckEdfp9RzDhdWZnKjiI-QVrMFA2CCsDDhO18SJgYeLVapEKTjAxO8BCfHfzlBzZAmeLLztwdU1kI4l_5dz5K1Qb06JeZN8eDESKL_16HxJVVxSAk4rSpypJ9Jd1bM2WaqUxD1sE0nlsGA",
-        #     group_id="1859854874666078530",
-        #     voice_id="male-qn-qingse",
-        #     model="speech-01-turbo",
+        #     # voice_id="male-qn-qingse",
+        #     model="speech-02-turbo",
+        #     speed=1.2,                  # 语速 (0.5-2.0) - 设置为较快
         # ),
-        
+        # 语音合成 (TTS) - 使用阿里云 CosyVoice 语音合成
+        # tts=aliyun.TTS(
+        #     model="cosyvoice-v2",  # CosyVoice v2 模型
+        #     voice="longcheng_v2",  # 语音类型：龙城
+        #     speech_rate=1.0,  # 语速：1.0 为正常速度 (0.5-2.0)
+        #     # 注意：当前版本的 aliyun.TTS 不支持 pitch_rate 和 volume 参数
+        # ),
         # 大语言模型 (LLM) - 使用阿里云 Qwen 系列模型
         llm=aliyun.LLM(
             model="qwen-plus",          # Qwen Plus 模型（可选：qwen-max, qwen-turbo）
@@ -89,22 +94,22 @@ async def entrypoint(ctx: JobContext):
             # 这些参数可能需要通过其他方式配置
         ),
     )
-    
+
     # 启动会话
     await session.start(agent=agent, room=ctx.room)
-    
+
     # 连接到房间
     await ctx.connect()
-    
+
     logger.info("Agent 已成功启动并连接到房间")
 
 
 if __name__ == "__main__":
     # 加载环境变量
     load_dotenv()
-    
+
     logger.info("启动 LiveKit Agent Worker...")
-    
+
     # 运行 Agent Worker
     cli.run_app(
         WorkerOptions(
