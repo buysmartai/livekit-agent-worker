@@ -42,12 +42,59 @@ class VisionAgent(Agent):
 
     该 Agent 能够在用户提问时自动捕获视频帧，
     并将图像发送给支持多模态的 LLM 进行分析。
+
+    支持动态调整 instructions 以适应不同场景。
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._last_video_frame: rtc.VideoFrame | None = None
         self._video_track: rtc.RemoteVideoTrack | None = None
+        self._mode: str = "general"  # 当前模式：general, detail, guide 等
+
+    async def switch_mode(self, mode: str) -> None:
+        """
+        切换 Agent 模式，动态调整 instructions
+
+        Args:
+            mode: 模式类型
+                - "general": 通用对话模式
+                - "detail": 详细分析模式
+                - "guide": 引导教学模式
+                - "security": 安全监控模式
+        """
+        self._mode = mode
+
+        instructions_map = {
+            "general": (
+                "你是一个友好的 AI 语音助手，具备视觉分析能力。"
+                "你可以看到用户的视频画面，并能够描述和分析画面内容。"
+                "当用户询问关于画面的问题时，请基于图像内容给出准确的回答。"
+                "请用简洁、清晰的语言与用户交流。"
+            ),
+            "detail": (
+                "你是一个专业的视觉分析助手。"
+                "请详细描述画面中的所有元素，包括：物体、颜色、位置、数量、状态等。"
+                "提供结构化的分析，从整体到细节逐步说明。"
+                "使用专业术语，但保持易于理解。"
+            ),
+            "guide": (
+                "你是一个耐心的教学助手，具备视觉引导能力。"
+                "观察用户的操作画面，提供逐步指导和建议。"
+                "当用户做得对时给予鼓励，遇到问题时提供解决方案。"
+                "用温和、支持性的语气进行交流。"
+            ),
+            "security": (
+                "你是一个安全监控助手。"
+                "密切关注画面中的异常情况，如：陌生人、危险行为、物品遗失等。"
+                "发现问题时立即提醒，保持警觉但避免误报。"
+                "使用简洁、紧急的语气传达重要信息。"
+            )
+        }
+
+        new_instructions = instructions_map.get(mode, instructions_map["general"])
+        await self.update_instructions(new_instructions)
+        logger.info(f"已切换到 {mode} 模式，instructions 已更新")
 
     async def on_user_turn_completed(
         self,
@@ -175,6 +222,48 @@ async def entrypoint(ctx: JobContext):
                 asyncio.create_task(_process_video_track(publication.track, agent))
 
     logger.info("Agent 已成功启动并连接到房间")
+
+    # ========== 动态调整 Instructions 示例 ==========
+    #
+    # 示例 1: 在 5 秒后切换到详细分析模式
+    # await asyncio.sleep(5)
+    # await agent.switch_mode("detail")
+    # logger.info("已切换到详细分析模式")
+    #
+    # 示例 2: 根据用户命令切换模式
+    # @session.on("user_input_transcribed")
+    # async def on_user_command(event):
+    #     text = event.text.lower()
+    #     if "详细模式" in text or "详细分析" in text:
+    #         await agent.switch_mode("detail")
+    #     elif "引导模式" in text or "教学模式" in text:
+    #         await agent.switch_mode("guide")
+    #     elif "监控模式" in text or "安全模式" in text:
+    #         await agent.switch_mode("security")
+    #     elif "普通模式" in text or "通用模式" in text:
+    #         await agent.switch_mode("general")
+    #
+    # 示例 3: 使用 FunctionTool 让 LLM 自主切换模式
+    # from livekit.agents.llm import function_tool
+    #
+    # @function_tool
+    # async def switch_analysis_mode(mode: str):
+    #     """
+    #     切换视觉分析模式
+    #
+    #     Args:
+    #         mode: 模式类型，可选 "general", "detail", "guide", "security"
+    #     """
+    #     await agent.switch_mode(mode)
+    #     return f"已切换到 {mode} 模式"
+    #
+    # # 然后在创建 Agent 时添加这个工具：
+    # # agent = VisionAgent(
+    # #     instructions="...",
+    # #     tools=[switch_analysis_mode]
+    # # )
+    #
+    # ============================================
 
 
 async def _process_video_track(track: rtc.VideoTrack, agent: VisionAgent):
