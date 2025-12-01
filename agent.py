@@ -67,7 +67,7 @@ class VisionAgent(Agent):
 
         # RAG 相关
         self._memory_store: dict[str, list[str]] = {}  # 简单的内存存储
-        self._enable_rag: bool = True  # 是否启用 RAG
+        self._enable_rag: bool = False  # 是否启用 RAG（已禁用）
 
     def set_active_video_sources(self, sources: list[str]) -> None:
         """
@@ -162,105 +162,6 @@ class VisionAgent(Agent):
         await self.update_instructions(new_instructions)
         logger.info(f"已切换到 {mode} 模式，instructions 已更新")
 
-    def add_memory(self, user_id: str, memory: str) -> None:
-        """
-        添加用户记忆
-
-        Args:
-            user_id: 用户标识
-            memory: 记忆内容
-        """
-        if user_id not in self._memory_store:
-            self._memory_store[user_id] = []
-
-        self._memory_store[user_id].append(memory)
-        logger.info(f"为用户 {user_id} 添加记忆: {memory[:50]}...")
-
-    def search_memory(self, user_id: str, query: str, top_k: int = 3) -> list[str]:
-        """
-        搜索相关记忆（简单的关键词匹配，实际应用建议使用向量数据库）
-
-        Args:
-            user_id: 用户标识
-            query: 查询文本
-            top_k: 返回最相关的 K 条记忆
-
-        Returns:
-            相关记忆列表
-        """
-        if user_id not in self._memory_store:
-            return []
-
-        memories = self._memory_store[user_id]
-
-        # 简单的关键词匹配（实际应用建议使用向量相似度）
-        query_words = set(query.lower().split())
-        scored_memories = []
-
-        for memory in memories:
-            memory_words = set(memory.lower().split())
-            # 计算交集大小作为相关性分数
-            score = len(query_words & memory_words)
-            if score > 0:
-                scored_memories.append((score, memory))
-
-        # 按分数排序并返回 top_k
-        scored_memories.sort(reverse=True, key=lambda x: x[0])
-        return [mem for _, mem in scored_memories[:top_k]]
-
-    async def inject_context_to_chat(
-        self,
-        turn_ctx: llm.ChatContext,
-        user_id: str,
-        query: str
-    ) -> None:
-        """
-        动态注入上下文信息到 ChatContext
-
-        这个方法会：
-        1. 搜索相关记忆
-        2. 构建增强的 system 消息
-        3. 注入到对话上下文中
-
-        Args:
-            turn_ctx: 当前对话上下文
-            user_id: 用户标识
-            query: 用户查询
-        """
-        if not self._enable_rag:
-            return
-
-        # 1. 搜索相关记忆
-        relevant_memories = self.search_memory(user_id, query, top_k=3)
-
-        # 2. 构建增强的上下文
-        if relevant_memories:
-            context_parts = [
-                "【相关背景信息】",
-                "以下是与当前对话相关的历史信息：",
-                ""
-            ]
-
-            for i, memory in enumerate(relevant_memories, 1):
-                context_parts.append(f"{i}. {memory}")
-
-            context_parts.append("")
-            context_parts.append("请结合以上信息回答用户的问题。")
-
-            enhanced_context = "\n".join(context_parts)
-
-            # 3. 注入到 ChatContext
-            # 在用户消息之前插入一个 system 消息
-            turn_ctx.add_message(
-                role="system",
-                content=enhanced_context,
-                # 使用当前时间确保插入到最新位置
-            )
-
-            logger.info(
-                f"已注入 RAG 上下文，包含 {len(relevant_memories)} 条相关记忆"
-            )
-
     async def on_user_turn_completed(
         self,
         turn_ctx: llm.ChatContext,
@@ -276,13 +177,8 @@ class VisionAgent(Agent):
         # 获取用户文本内容
         user_text = new_message.text_content or ""
 
-        # 1. RAG 增强：注入相关上下文
-        if self._enable_rag and user_text:
-            # 这里使用 participant identity 作为 user_id
-            # 实际应用中可以从 session 中获取更准确的用户标识
-            user_id = "default_user"  # 可以从 self._activity._session 获取
-
-            await self.inject_context_to_chat(turn_ctx, user_id, user_text)
+        # RAG 注入逻辑已临时移除（self._enable_rag=False）。如果需要恢复，请在此处
+        # 调用相应的注入函数并启用 _enable_rag。
 
         # 2. 视觉增强：添加活跃视频源的帧
         image_contents = []
