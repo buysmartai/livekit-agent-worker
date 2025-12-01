@@ -40,17 +40,83 @@ class VisionAgent(Agent):
     """
     支持视觉分析的自定义 Agent
 
-    该 Agent 能够在用户提问时自动捕获视频帧，
-    并将图像发送给支持多模态的 LLM 进行分析。
-
-    支持动态调整 instructions 以适应不同场景。
+    功能特性：
+    - 视频多模态分析
+    - 动态调整 instructions
+    - RAG 记忆增强
+    - 动态 prompt 注入
+    - 多轨道视频支持（摄像头 + 屏幕分享）
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # 支持多个视频轨道
+        self._video_frames: dict[str, rtc.VideoFrame | None] = {
+            "camera": None,      # 摄像头轨道的最新帧
+            "screen_share": None # 屏幕分享轨道的最新帧
+        }
+        self._video_tracks: dict[str, rtc.RemoteVideoTrack] = {}
+        self._mode: str = "general"  # 当前模式：general, detail, guide 等
+
+        # 控制哪些轨道的图片会被发送到 LLM
+        self._active_video_sources: set[str] = {"camera"}  # 默认只发送摄像头
+
+        # 向后兼容
         self._last_video_frame: rtc.VideoFrame | None = None
         self._video_track: rtc.RemoteVideoTrack | None = None
-        self._mode: str = "general"  # 当前模式：general, detail, guide 等
+
+        # RAG 相关
+        self._memory_store: dict[str, list[str]] = {}  # 简单的内存存储
+        self._enable_rag: bool = True  # 是否启用 RAG
+
+    def set_active_video_sources(self, sources: list[str]) -> None:
+        """
+        设置哪些视频源应该被发送到 LLM
+
+        Args:
+            sources: 视频源列表，可选值: ["camera", "screen_share"]
+                    - ["camera"]: 只发送摄像头画面
+                    - ["screen_share"]: 只发送屏幕分享画面
+                    - ["camera", "screen_share"]: 同时发送两个画面
+        """
+        self._active_video_sources = set(sources)
+        logger.info(f"已设置活跃视频源: {sources}")
+
+    def update_video_frame(self, source_type: str, frame: rtc.VideoFrame) -> None:
+        """
+        更新指定来源的视频帧
+
+        Args:
+            source_type: 视频源类型 ("camera" 或 "screen_share")
+            frame: 视频帧
+        """
+        self._video_frames[source_type] = frame
+        # 向后兼容：更新 _last_video_frame 为摄像头帧
+        if source_type == "camera":
+            self._last_video_frame = frame
+
+    def set_mode(self, mode: str, video_sources: list[str] | None = None) -> None:
+        """
+        设置 Agent 的工作模式，并可选地调整活跃视频源
+
+        Args:
+            mode: 模式名称，例如 "general", "screen_analysis", "dual_view" 等
+            video_sources: 可选，该模式下使用的视频源列表
+
+        示例:
+            # 一般对话模式，只使用摄像头
+            agent.set_mode("general", ["camera"])
+
+            # 屏幕分析模式，只使用屏幕分享
+            agent.set_mode("screen_analysis", ["screen_share"])
+
+            # 双视图模式，同时使用摄像头和屏幕
+            agent.set_mode("dual_view", ["camera", "screen_share"])
+        """
+        self._mode = mode
+        if video_sources is not None:
+            self.set_active_video_sources(video_sources)
+        logger.info(f"Agent 模式已设置为: {mode}, 活跃视频源: {self._active_video_sources}")
 
     async def switch_mode(self, mode: str) -> None:
         """
@@ -96,6 +162,105 @@ class VisionAgent(Agent):
         await self.update_instructions(new_instructions)
         logger.info(f"已切换到 {mode} 模式，instructions 已更新")
 
+    def add_memory(self, user_id: str, memory: str) -> None:
+        """
+        添加用户记忆
+
+        Args:
+            user_id: 用户标识
+            memory: 记忆内容
+        """
+        if user_id not in self._memory_store:
+            self._memory_store[user_id] = []
+
+        self._memory_store[user_id].append(memory)
+        logger.info(f"为用户 {user_id} 添加记忆: {memory[:50]}...")
+
+    def search_memory(self, user_id: str, query: str, top_k: int = 3) -> list[str]:
+        """
+        搜索相关记忆（简单的关键词匹配，实际应用建议使用向量数据库）
+
+        Args:
+            user_id: 用户标识
+            query: 查询文本
+            top_k: 返回最相关的 K 条记忆
+
+        Returns:
+            相关记忆列表
+        """
+        if user_id not in self._memory_store:
+            return []
+
+        memories = self._memory_store[user_id]
+
+        # 简单的关键词匹配（实际应用建议使用向量相似度）
+        query_words = set(query.lower().split())
+        scored_memories = []
+
+        for memory in memories:
+            memory_words = set(memory.lower().split())
+            # 计算交集大小作为相关性分数
+            score = len(query_words & memory_words)
+            if score > 0:
+                scored_memories.append((score, memory))
+
+        # 按分数排序并返回 top_k
+        scored_memories.sort(reverse=True, key=lambda x: x[0])
+        return [mem for _, mem in scored_memories[:top_k]]
+
+    async def inject_context_to_chat(
+        self,
+        turn_ctx: llm.ChatContext,
+        user_id: str,
+        query: str
+    ) -> None:
+        """
+        动态注入上下文信息到 ChatContext
+
+        这个方法会：
+        1. 搜索相关记忆
+        2. 构建增强的 system 消息
+        3. 注入到对话上下文中
+
+        Args:
+            turn_ctx: 当前对话上下文
+            user_id: 用户标识
+            query: 用户查询
+        """
+        if not self._enable_rag:
+            return
+
+        # 1. 搜索相关记忆
+        relevant_memories = self.search_memory(user_id, query, top_k=3)
+
+        # 2. 构建增强的上下文
+        if relevant_memories:
+            context_parts = [
+                "【相关背景信息】",
+                "以下是与当前对话相关的历史信息：",
+                ""
+            ]
+
+            for i, memory in enumerate(relevant_memories, 1):
+                context_parts.append(f"{i}. {memory}")
+
+            context_parts.append("")
+            context_parts.append("请结合以上信息回答用户的问题。")
+
+            enhanced_context = "\n".join(context_parts)
+
+            # 3. 注入到 ChatContext
+            # 在用户消息之前插入一个 system 消息
+            turn_ctx.add_message(
+                role="system",
+                content=enhanced_context,
+                # 使用当前时间确保插入到最新位置
+            )
+
+            logger.info(
+                f"已注入 RAG 上下文，包含 {len(relevant_memories)} 条相关记忆"
+            )
+
     async def on_user_turn_completed(
         self,
         turn_ctx: llm.ChatContext,
@@ -104,33 +269,69 @@ class VisionAgent(Agent):
         """
         在用户完成说话后、LLM 响应前的钩子函数
 
-        检查是否有可用的视频帧，如果有则添加到用户消息中。
+        功能：
+        1. 搜索并注入相关记忆（RAG）
+        2. 添加视频帧到消息中（支持多个视频源）
         """
-        # 如果有视频帧，添加到新消息中
-        if self._last_video_frame is not None:
-            # 创建 ImageContent 并添加到用户消息中
-            # 使用较小的分辨率以降低成本和延迟
-            image_content = llm.ImageContent(
-                image=self._last_video_frame,
-                inference_width=512,  # 调整为 512 像素宽度
-                inference_height=512,  # 调整为 512 像素高度
-            )
+        # 获取用户文本内容
+        user_text = new_message.text_content or ""
 
-            # 将图像添加到用户消息内容中
+        # 1. RAG 增强：注入相关上下文
+        if self._enable_rag and user_text:
+            # 这里使用 participant identity 作为 user_id
+            # 实际应用中可以从 session 中获取更准确的用户标识
+            user_id = "default_user"  # 可以从 self._activity._session 获取
+
+            await self.inject_context_to_chat(turn_ctx, user_id, user_text)
+
+        # 2. 视觉增强：添加活跃视频源的帧
+        image_contents = []
+
+        for source_type in self._active_video_sources:
+            frame = self._video_frames.get(source_type)
+            if frame is not None:
+                # 创建 ImageContent 并添加描述
+                image_content = llm.ImageContent(
+                    image=frame,
+                    inference_width=512,
+                    inference_height=512,
+                )
+                image_contents.append((source_type, image_content))
+
+                logger.info(
+                    f"已添加 {source_type} 视频帧到 LLM 上下文，"
+                    f"分辨率: {frame.width}x{frame.height}"
+                )
+
+        # 将图像添加到用户消息内容中
+        if image_contents:
+            # 如果有多个图像源，在文本中添加说明
+            if len(image_contents) > 1:
+                source_description = "（包含 " + "、".join([s for s, _ in image_contents]) + " 的画面）"
+                if isinstance(new_message.content, str):
+                    new_message.content = [new_message.content + source_description]
+                elif isinstance(new_message.content, list):
+                    # 修改第一个文本内容
+                    for i, c in enumerate(new_message.content):
+                        if isinstance(c, str):
+                            new_message.content[i] = c + source_description
+                            break
+
+            # 转换为列表格式
             if isinstance(new_message.content, str):
-                new_message.content = [new_message.content, image_content]
-            elif isinstance(new_message.content, list):
-                # 检查是否已经添加了图片（避免重复）
+                new_message.content = [new_message.content]
+            elif not isinstance(new_message.content, list):
+                new_message.content = []
+
+            # 添加所有图像内容
+            for source_type, image_content in image_contents:
+                # 检查是否已经添加了该源的图片（避免重复）
                 has_image = any(
                     isinstance(c, llm.ImageContent) for c in new_message.content
                 )
-                if not has_image:
+                if not has_image or len(image_contents) > 1:
                     new_message.content.append(image_content)
 
-            logger.info(
-                f"已添加视频帧到 LLM 上下文，分辨率: "
-                f"{self._last_video_frame.width}x{self._last_video_frame.height}"
-            )
 
         await super().on_user_turn_completed(turn_ctx, new_message)
 
@@ -201,12 +402,35 @@ async def entrypoint(ctx: JobContext):
     ):
         """当订阅到新轨道时的回调"""
         if track.kind == rtc.TrackKind.KIND_VIDEO:
+            # 根据 publication.source 判断视频源类型
+            # LiveKit 的 TrackSource 枚举值（protobuf 枚举）：
+            # - SOURCE_UNKNOWN (0): 未知
+            # - SOURCE_CAMERA (1): 摄像头
+            # - SOURCE_MICROPHONE (2): 麦克风
+            # - SOURCE_SCREENSHARE (3): 屏幕分享
+            # - SOURCE_SCREENSHARE_AUDIO (4): 屏幕分享音频
+            source = publication.source
+
+            # 将 LiveKit 的 source 枚举映射到我们的字符串标识
+            source_camera = rtc.TrackSource.Value('SOURCE_CAMERA')
+            source_screenshare = rtc.TrackSource.Value('SOURCE_SCREENSHARE')
+
+            if source == source_camera:
+                source_type = "camera"
+            elif source == source_screenshare:
+                source_type = "screen_share"
+            else:
+                source_type = "camera"  # 默认为摄像头
+
             logger.info(
                 f"订阅到视频轨道: participant={participant.identity}, "
-                f"source={publication.source}"
+                f"source={source}, type={source_type}"
             )
-            # 创建任务来处理视频流（添加类型转换）
-            asyncio.create_task(_process_video_track(track, agent))  # type: ignore
+
+            # 创建任务来处理视频流，传入源类型
+            asyncio.create_task(
+                _process_video_track(track, agent, source_type)  # type: ignore
+            )
 
     # 检查是否已经有视频轨道
     for participant in ctx.room.remote_participants.values():
@@ -216,12 +440,28 @@ async def entrypoint(ctx: JobContext):
                 and publication.track
                 and publication.track.kind == rtc.TrackKind.KIND_VIDEO
             ):
+                # 同样判断源类型
+                source = publication.source
+                source_camera = rtc.TrackSource.Value('SOURCE_CAMERA')
+                source_screenshare = rtc.TrackSource.Value('SOURCE_SCREENSHARE')
+
+                if source == source_camera:
+                    source_type = "camera"
+                elif source == source_screenshare:
+                    source_type = "screen_share"
+                else:
+                    source_type = "camera"
+
                 logger.info(
-                    f"发现已存在的视频轨道: participant={participant.identity}"
+                    f"发现已存在的视频轨道: participant={participant.identity}, "
+                    f"source={source}, type={source_type}"
                 )
-                asyncio.create_task(_process_video_track(publication.track, agent))
+                asyncio.create_task(
+                    _process_video_track(publication.track, agent, source_type)
+                )
 
     logger.info("Agent 已成功启动并连接到房间")
+
 
     # ========== 动态调整 Instructions 示例 ==========
     #
@@ -266,26 +506,34 @@ async def entrypoint(ctx: JobContext):
     # ============================================
 
 
-async def _process_video_track(track: rtc.VideoTrack, agent: VisionAgent):
+async def _process_video_track(
+    track: rtc.VideoTrack,
+    agent: VisionAgent,
+    source_type: str = "camera"
+):
     """
     处理视频轨道，持续更新最新的视频帧
 
     Args:
         track: 视频轨道
         agent: VisionAgent 实例
+        source_type: 视频源类型 ("camera" 或 "screen_share")
     """
     video_stream = rtc.VideoStream(track)
-    logger.info("开始处理视频流...")
+    logger.info(f"开始处理 {source_type} 视频流...")
 
     try:
         async for event in video_stream:
-            # 更新 agent 的最新视频帧
-            agent._last_video_frame = event.frame
-            # logger.debug(f"更新视频帧: {event.frame.width}x{event.frame.height}")
+            # 更新 agent 对应源的最新视频帧
+            agent.update_video_frame(source_type, event.frame)
+            # logger.debug(
+            #     f"更新 {source_type} 视频帧: "
+            #     f"{event.frame.width}x{event.frame.height}"
+            # )
     except Exception as e:
-        logger.error(f"处理视频流时出错: {e}")
+        logger.error(f"处理 {source_type} 视频流时出错: {e}")
     finally:
-        logger.info("视频流处理结束")
+        logger.info(f"{source_type} 视频流处理结束")
 
 
 if __name__ == "__main__":
