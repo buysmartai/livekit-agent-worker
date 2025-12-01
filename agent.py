@@ -175,7 +175,6 @@ class VisionAgent(Agent):
         """
         # 获取用户文本内容
         user_text = new_message.text_content or ""
-        print(f"[DEBUG] User text: {user_text}")
 
         # RAG 注入逻辑已临时移除（self._enable_rag=False）。如果需要恢复，请在此处
         # 调用相应的注入函数并启用 _enable_rag。
@@ -183,8 +182,6 @@ class VisionAgent(Agent):
         # 2. 视觉增强：添加活跃视频源的帧
         image_contents = []
 
-        # self._active_video_sources
-        print(f"[DEBUG] Active video sources: {self._active_video_sources}")
 
         for source_type in self._active_video_sources:
             frame = self._video_frames.get(source_type)
@@ -195,20 +192,6 @@ class VisionAgent(Agent):
                     inference_width=512,
                     inference_height=512,
                 )
-                # --- 调试输出: 在控制台检查 image_content 是否存在及其基本信息 ---
-                try:
-                    exists = image_content is not None
-                    logger.info(f"image_content exists={exists}, type={type(image_content)}")
-                    # 同时打印到 stdout 以便在运行环境的控制台直接看到（方便调试）
-                    print(f"[DEBUG] image_content for {source_type}: exists={exists}, type={type(image_content)}")
-                    # 打印帧的基本信息，避免直接访问不存在属性导致异常
-                    frame_w = getattr(frame, 'width', 'N/A')
-                    frame_h = getattr(frame, 'height', 'N/A')
-                    frame_ts = getattr(frame, 'timestamp', 'N/A')
-                    print(f"[DEBUG] frame info for {source_type}: {frame_w}x{frame_h}, timestamp={frame_ts}")
-                except Exception as _dbg_exc:
-                    logger.exception("打印 image_content 调试信息时发生异常")
-                # --- 调试输出结束 ---
                 image_contents.append((source_type, image_content))
 
                 logger.info(

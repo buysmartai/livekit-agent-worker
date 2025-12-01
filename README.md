@@ -7,6 +7,7 @@
 - 🎤 **实时语音识别 (STT)**: 使用阿里云 Paraformer 实时语音识别模型
 - 🗣️ **自然语音合成 (TTS)**: 使用阿里云 CosyVoice 高质量语音合成
 - 🤖 **智能对话 (LLM)**: 集成阿里云 Qwen 大语言模型
+- 👁️ **视觉分析 (Vision)**: 支持多模态视觉理解，可同时分析摄像头和屏幕分享画面
 - 🚀 **低延迟**: 基于 LiveKit 实时通信框架
 - 🔧 **易于配置**: 简单的环境变量配置
 
@@ -44,12 +45,38 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**注意**: 如果在安装过程中遇到缺少某些依赖的问题，`requirements.txt` 已包含所有必需的包：
-- `livekit-agents>=1.2.9` - LiveKit Agents 核心框架
-- `livekit-plugins-aliyun>=1.2.9` - 阿里云插件
-- `httpx` - HTTP 客户端（阿里云插件依赖）
-- `openai` - OpenAI SDK（阿里云插件依赖）
-- `python-dotenv` - 环境变量管理
+**核心依赖说明**：
+
+`requirements.txt` 包含以下必需的包：
+
+- **`livekit-agents[elevenlabs,images]>=1.2.9`** - LiveKit Agents 核心框架
+  - `elevenlabs` 扩展：支持 ElevenLabs TTS
+  - **`images` 扩展：提供图像处理支持（必需）**
+    - 安装 Pillow (PIL) 库用于图像编码
+    - **为什么必需？** 当使用视觉分析功能时，需要将视频帧序列化为 base64 编码的图像发送给 LLM
+    - 如果缺少此扩展，会出现错误：`ImportError: You haven't included the 'images' optional dependencies`
+  
+- **`livekit-plugins-aliyun>=1.2.9`** - 阿里云插件（STT/TTS/LLM）
+
+- **`livekit-plugins-minimax>=1.2.9`** - Minimax 插件（可选的 TTS 提供商）
+
+- **`httpx`** - HTTP 客户端（阿里云插件依赖）
+
+- **`openai`** - OpenAI SDK（阿里云插件使用兼容的 API 格式）
+
+- **`python-dotenv`** - 环境变量管理
+
+> **⚠️ 重要提示**：如果你在运行时遇到图像相关的错误，请确保已安装 `images` 扩展：
+> ```bash
+> pip install "livekit-agents[images]>=1.2.9"
+> ```
+
+**验证安装**：
+
+```bash
+# 验证 PIL/Pillow 是否正确安装
+python -c "from PIL import Image; print('✅ PIL installed successfully')"
+```
 
 ### 4. 配置环境变量
 
@@ -194,6 +221,101 @@ llm=aliyun.LLM(
 - `qwen-plus` - Qwen Plus 模型（推荐，平衡性能和成本）
 - `qwen-max` - Qwen Max 模型（最强性能）
 - `qwen-turbo` - Qwen Turbo 模型（最快速度）
+
+**视觉分析模型**（支持图像输入）：
+- `qwen-vl-max` - Qwen-VL-Max 视觉语言模型（最强视觉理解能力）
+- `qwen-vl-plus` - Qwen-VL-Plus 视觉语言模型（更快但精度稍低）
+
+### 视觉分析功能
+
+本项目支持多模态视觉分析，可以同时处理**摄像头**和**屏幕分享**的视频��。
+
+#### 配置视觉模型
+
+使用支持视觉的 LLM 模型：
+
+```python
+llm=aliyun.LLM(
+    model="qwen-vl-max",  # 使用视觉语言模型
+)
+```
+
+#### 配置视频采样器
+
+```python
+video_sampler=VoiceActivityVideoSampler(
+    speaking_fps=1.0,   # 用户说话时每秒采样 1 帧
+    silent_fps=0.3      # 用户沉默时每秒采样 0.3 帧
+)
+```
+
+#### 多视频源支持
+
+Agent 自动支持以下视频源：
+- **摄像头 (camera)**: 用户的摄像头画面
+- **屏幕分享 (screen_share)**: 用户的屏幕共享画面
+
+默认配置会同时发送两个视频源到 LLM：
+
+```python
+# 在 VisionAgent.__init__ 中
+self._active_video_sources: set[str] = {"camera", "screen_share"}
+```
+
+#### 自定义视频源
+
+如果只需要某一个视频源，可以修改：
+
+```python
+# 只使用摄像头
+agent.set_active_video_sources(["camera"])
+
+# 只使用屏幕分享
+agent.set_active_video_sources(["screen_share"])
+
+# 同时使用两者
+agent.set_active_video_sources(["camera", "screen_share"])
+```
+
+#### 工作原理
+
+1. **视频帧捕获**: `_process_video_track` 函数持续从 LiveKit 轨道读取视频帧
+2. **帧存储**: 最新的视频帧存储在 `_video_frames` 字典中
+3. **图像编码**: 使用 **Pillow (PIL)** 将视频帧编码为 base64 格式
+4. **发送到 LLM**: 在 `on_user_turn_completed` 钩子中，将图像添加到用户消息中
+5. **多模态理解**: Qwen-VL 模型同时理解文本和图像内容
+
+#### 依赖说明
+
+视觉分析功能需要 **`livekit-agents[images]`** 扩展：
+
+- 该扩展会安装 **Pillow (PIL)** 库
+- Pillow 用于将 LiveKit 的 `VideoFrame` 对象编码为 JPEG/PNG 格式
+- 编码后的图像以 base64 字符串形式发送给 Qwen-VL 模型
+
+**如果缺少此依赖，会出现以下错误**：
+
+```
+ImportError: You haven't included the 'images' optional dependencies. 
+Please install the 'codecs' extra by running `pip install livekit-agents[images]`
+```
+
+**解决方法**：
+
+```bash
+pip install "livekit-agents[images]>=1.2.9"
+```
+
+#### 使用示例
+
+用户可以询问关于视频画面的问题：
+
+- "你看到了什么？"
+- "这个屏幕上显示的是什么内容？"
+- "我的背景看起来怎么样？"
+- "帮我分析一下这个图表"
+
+Agent 会基于实时捕获的视频帧给出准确的回答。
 
 ## 📁 项目结构
 

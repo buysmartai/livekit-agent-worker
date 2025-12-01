@@ -1,5 +1,6 @@
 # LiveKit Agent 核心依赖
-livekit-agents[elevenlabs]>=1.2.9
+# 注意：images 扩展提供 PIL/Pillow 支持，用于图像编码（视觉分析必需）
+livekit-agents[elevenlabs,images]>=1.2.9
 # minimax 插件
 livekit-plugins-minimax>=1.2.9
 
