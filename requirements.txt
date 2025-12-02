@@ -11,6 +11,9 @@ livekit-plugins-aliyun>=1.2.9
 httpx
 openai
 
+# HTTP 客户端 - 用于 REST API 调用
+httpx>=0.25.0
+
 # 环境变量管理
 python-dotenv
 

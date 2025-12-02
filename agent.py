@@ -16,6 +16,17 @@ LiveKit Agent Worker - 阿里云语音助手服务
 import asyncio
 import logging
 from dotenv import load_dotenv
+import os
+from typing import Optional
+import json
+from datetime import datetime
+
+# HTTP 客户端 - 用于调用 REST API
+try:
+    import httpx
+except ImportError:
+    httpx = None
+    logging.warning("⚠️  httpx 未安装，REST API 功能将不可用。安装: pip install httpx")
 
 from livekit import rtc
 from livekit.agents import (
@@ -69,6 +80,18 @@ class VisionAgent(Agent):
         # RAG 相关
         self._memory_store: dict[str, list[str]] = {}  # 简单的内存存储
         self._enable_rag: bool = False  # 是否启用 RAG（已禁用）
+
+        # REST API 相关
+        self._last_pingback: Optional[dict] = None  # 存储最后一次 API 调用的 pingback 数据
+        self._http_client: Optional[httpx.AsyncClient] = None  # HTTP 客户端（复用连接）
+
+        # 初始化 HTTP 客户端
+        if httpx:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=3.0),
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+            )
+            logger.info("✅ HTTP 客户端已初始化")
 
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._active_video_sources}")
 
@@ -167,6 +190,103 @@ class VisionAgent(Agent):
         await self.update_instructions(new_instructions)
         logger.info(f"已切换到 {mode} 模式，instructions 已更新")
 
+    async def get_dynamic_prompt(
+        self,
+        user_text: str,
+        user_id: str = "default_user",
+        avatar_id: str = "default_avatar",
+        session_id: str = "default_session"
+    ) -> Optional[dict]:
+        """
+        调用后端 REST API 获取动态 prompt
+
+        Args:
+            user_text: 用户输入的文本
+            user_id: 用户 ID
+            avatar_id: 角色 ID
+            session_id: 会话 ID
+
+        Returns:
+            包含 data (messages, maxOutputTokens 等) 和 pingback 的字典，如果失败返回 None
+        """
+        if not self._http_client:
+            logger.error("❌ HTTP 客户端未初始化，无法调用 REST API")
+            return None
+
+        # 从环境变量获取 API 配置
+        api_base_url = os.getenv("CHAT_API_BASE_URL", "https://your-api.com")
+        api_key = os.getenv("CHAT_API_KEY", "")
+
+        try:
+            # 构建请求体（参考你提供的 API 格式）
+            request_body = {
+                "reqId": os.urandom(16).hex(),
+                "timezone": os.getenv("TIMEZONE", "Asia/Shanghai"),
+                "appOs": "livekit",
+                "appVersion": "1.0.0",
+                "userLocalTime": datetime.now().isoformat(),
+                "userId": user_id,
+                "avatarId": avatar_id,
+                "chatStatusType": "append",
+                "sessionId": session_id,
+                "agentContext": {
+                    "agentType": "voice_chat",
+                    "context": {}
+                },
+                "language": os.getenv("LANGUAGE", "en"),
+                "input": None,
+                "latestUserInput": [
+                    {
+                        "source": "content",
+                        "type": "text",
+                        "text": user_text,
+                        "image_url": None,
+                        "input_audio": None
+                    }
+                ],
+                "timestamp": int(datetime.now().timestamp() * 1000),
+                "modelProvider": os.getenv("MODEL_PROVIDER", "vercel"),
+                "gptModel": os.getenv("GPT_MODEL", "claude-3-7-sonnet-20250219")
+            }
+
+            logger.info(f"🌐 调用 getChatPrompt API: {api_base_url}/chat/getChatPrompt")
+            logger.info(f"📋 请求参数: userId={user_id}, avatarId={avatar_id}, sessionId={session_id}")
+
+            response = await self._http_client.post(
+                f"{api_base_url}/chat/getChatPrompt",
+                json=request_body,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == "0":
+                    logger.info(f"✅ 获取动态 prompt 成功")
+
+                    # 返回完整的响应数据
+                    return {
+                        "data": result.get("data", {}),
+                        "pingback": result.get("pingback", {}),
+                        "messages": result.get("messages", [])
+                    }
+                else:
+                    logger.warning(f"⚠️  API 返回错误码: {result.get('code')}")
+                    return None
+            else:
+                logger.error(f"❌ API 请求失败: HTTP {response.status_code}")
+                logger.error(f"响应内容: {response.text[:200]}")
+                return None
+
+        except httpx.TimeoutException:
+            logger.error("❌ getChatPrompt API 超时（10秒）")
+            return None
+        except Exception as e:
+            logger.error(f"❌ getChatPrompt API 调用异常: {e}", exc_info=True)
+            return None
+
     async def on_user_turn_completed(
         self,
         turn_ctx: llm.ChatContext,
@@ -187,10 +307,69 @@ class VisionAgent(Agent):
         user_text = new_message.text_content or ""
         logger.info(f"📝 用户输入: {user_text}")
 
-        # RAG 注入逻辑已临时移除（self._enable_rag=False）。如果需要恢复，请在此处
-        # 调用相应的注入函数并启用 _enable_rag。
+        # ========== 1. 调用 REST API 获取动态 prompt ==========
+        if self._http_client:
+            # 从环境变量或上下文获取用户信息
+            user_id = os.getenv("USER_ID", "default_user")
+            avatar_id = os.getenv("AVATAR_ID", "default_avatar")
+            session_id = os.getenv("SESSION_ID", "default_session")
 
-        # 2. 视觉增强：添加活跃视频源的帧
+            logger.info(f"🔄 准备调用 getChatPrompt API...")
+
+            prompt_result = await self.get_dynamic_prompt(
+                user_text=user_text,
+                user_id=user_id,
+                avatar_id=avatar_id,
+                session_id=session_id
+            )
+
+            if prompt_result:
+                # 获取返回的数据
+                data = prompt_result.get("data", {})
+                pingback = prompt_result.get("pingback", {})
+                api_messages = data.get("messages", [])
+
+                # 保存 pingback 数据（用于后续调用 saveGptResult）
+                self._last_pingback = pingback
+                prompt_id = pingback.get("promptId", "N/A")
+                logger.info(f"💾 保存 pingback 数据，promptId={prompt_id}")
+
+                # 处理返回的 messages，动态更新 system prompt
+                if api_messages:
+                    logger.info(f"📋 API 返回了 {len(api_messages)} 条消息")
+
+                    for api_msg in api_messages:
+                        role = api_msg.get("role")
+                        content = api_msg.get("content")
+
+                        if role == "system" and content:
+                            # 提取 system message 的文本
+                            system_text = ""
+                            if isinstance(content, str):
+                                system_text = content
+                            elif isinstance(content, list):
+                                # 处理列表格式的 content
+                                text_parts = []
+                                for item in content:
+                                    if isinstance(item, dict) and item.get("type") == "text":
+                                        text_parts.append(item.get("text", ""))
+                                system_text = " ".join(text_parts)
+
+                            if system_text:
+                                logger.info(f"🎭 动态更新 system prompt (前100字): {system_text[:100]}...")
+
+                                # 使用 update_instructions 更新 Agent 的 system prompt
+                                await self.update_instructions(system_text)
+                                logger.info("✅ System prompt 已动态更新")
+
+                # 可选：记录其他配置信息
+                max_tokens = data.get("maxOutputTokens", "N/A")
+                temperature = data.get("temperature", "N/A")
+                logger.info(f"⚙️  LLM 配置: maxOutputTokens={max_tokens}, temperature={temperature}")
+            else:
+                logger.warning("⚠️  未能获取动态 prompt，使用默认配置")
+
+        # ========== 2. 视觉增强：添加活跃视频源的帧 ==========
         image_contents = []
         logger.info(f"🎥 活跃视频源: {self._active_video_sources}")
 
