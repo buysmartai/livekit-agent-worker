@@ -14,6 +14,7 @@ LiveKit Agent Worker - 阿里云语音助手服务
 """
 
 import asyncio
+import io
 import logging
 from dotenv import load_dotenv
 import os
@@ -36,6 +37,7 @@ from livekit.agents import (
     llm,
 )
 from livekit.agents.voice import Agent, AgentSession, VoiceActivityVideoSampler
+from livekit.agents.utils import images
 from livekit.plugins import aliyun
 
 # 配置日志
@@ -300,7 +302,6 @@ class VisionAgent(Agent):
         try:
             import google.generativeai as genai
             from PIL import Image
-            import numpy as np
 
             # 配置 Gemini API
             gemini_api_key = os.getenv("GEMINI_API_KEY", "")
@@ -310,30 +311,25 @@ class VisionAgent(Agent):
 
             genai.configure(api_key=gemini_api_key)
 
-            # 将 VideoFrame 转换为 PIL Image
-            # 计算实际的通道数
-            total_pixels = frame.width * frame.height
-            arr = np.frombuffer(frame.data, dtype=np.uint8)
-            num_channels = len(arr) // total_pixels
+            # 使用 LiveKit 官方 API 将 VideoFrame 转换为 JPEG bytes
+            # 这会自动处理 YUV/I420 等格式到 RGBA 的转换
+            logger.info(f"🔄 [Gemini] 转换视频帧: {frame.width}x{frame.height}, type={frame.type}")
 
-            logger.debug(f"[Gemini] 图像数据: size={len(arr)}, pixels={total_pixels}, channels={num_channels}")
+            encode_options = images.EncodeOptions(
+                format="JPEG",
+                quality=85,
+                resize_options=images.ResizeOptions(
+                    width=1024,
+                    height=1024,
+                    strategy="scale_aspect_fit"
+                )
+            )
+            jpeg_bytes = images.encode(frame, encode_options)
 
-            # 根据实际通道数 reshape
-            if num_channels == 4:  # RGBA or ARGB
-                arr = arr.reshape((frame.height, frame.width, 4))
-                pil_image = Image.fromarray(arr, 'RGBA').convert('RGB')
-            elif num_channels == 3:  # RGB
-                arr = arr.reshape((frame.height, frame.width, 3))
-                pil_image = Image.fromarray(arr, 'RGB')
-            elif num_channels == 1:  # Grayscale
-                arr = arr.reshape((frame.height, frame.width))
-                pil_image = Image.fromarray(arr, 'L').convert('RGB')
-            else:
-                logger.error(
-                    f"❌ [Gemini] 不支持的通道数: {num_channels} (size={len(arr)}, {frame.width}x{frame.height})")
-                return None
+            # 从 JPEG bytes 创建 PIL Image
+            pil_image = Image.open(io.BytesIO(jpeg_bytes))
 
-            logger.info(f"🔍 [Gemini] 开始分析屏幕内容 ({frame.width}x{frame.height})...")
+            logger.info(f"🔍 [Gemini] 开始分析屏幕内容 ({pil_image.width}x{pil_image.height})...")
 
             # 使用 Gemini Flash 2.5
             model = genai.GenerativeModel('gemini-2.5-flash')
@@ -358,7 +354,7 @@ class VisionAgent(Agent):
 
         except ImportError as e:
             logger.error(f"❌ [Gemini] 缺少依赖库: {e}")
-            logger.error("请安装: pip install google-generativeai pillow numpy")
+            logger.error("请安装: pip install google-generativeai pillow")
             return None
         except Exception as e:
             logger.error(f"❌ [Gemini] 分析失败: {e}", exc_info=True)
