@@ -65,8 +65,8 @@ class VisionAgent(Agent):
 
         # 支持多个视频轨道
         self._video_frames: dict[str, rtc.VideoFrame | None] = {
-            "camera": None,      # 摄像头轨道的最新帧
-            "screen_share": None # 屏幕分享轨道的最新帧
+            "camera": None,  # 摄像头轨道的最新帧
+            "screen_share": None  # 屏幕分享轨道的最新帧
         }
         self._video_tracks: dict[str, rtc.RemoteVideoTrack] = {}
         self._mode: str = "general"  # 当前模式：general, detail, guide 等
@@ -117,7 +117,7 @@ class VisionAgent(Agent):
             frame: 视频帧
         """
         self._video_frames[source_type] = frame
-        logger.debug(f"🖼️  更新 {source_type} 视频帧: {frame.width}x{frame.height}")
+        # logger.debug(f"🖼️  更新 {source_type} 视频帧: {frame.width}x{frame.height}")
 
         # 向后兼容：更新 _last_video_frame 为摄像头帧
         if source_type == "camera":
@@ -191,11 +191,11 @@ class VisionAgent(Agent):
         logger.info(f"已切换到 {mode} 模式，instructions 已更新")
 
     async def get_dynamic_prompt(
-        self,
-        user_text: str,
-        user_id: str = "default_user",
-        avatar_id: str = "default_avatar",
-        session_id: str = "default_session"
+            self,
+            user_text: str,
+            user_id: str = "default_user",
+            avatar_id: str = "default_avatar",
+            session_id: str = "default_session"
     ) -> Optional[dict]:
         """
         调用后端 REST API 获取动态 prompt
@@ -311,16 +311,26 @@ class VisionAgent(Agent):
             genai.configure(api_key=gemini_api_key)
 
             # 将 VideoFrame 转换为 PIL Image
+            # 计算实际的通道数
+            total_pixels = frame.width * frame.height
             arr = np.frombuffer(frame.data, dtype=np.uint8)
-            arr = arr.reshape((frame.height, frame.width, -1))
+            num_channels = len(arr) // total_pixels
 
-            # 转换为 RGB（去掉 alpha 通道）
-            if arr.shape[2] == 4:  # RGBA
+            logger.debug(f"[Gemini] 图像数据: size={len(arr)}, pixels={total_pixels}, channels={num_channels}")
+
+            # 根据实际通道数 reshape
+            if num_channels == 4:  # RGBA or ARGB
+                arr = arr.reshape((frame.height, frame.width, 4))
                 pil_image = Image.fromarray(arr, 'RGBA').convert('RGB')
-            elif arr.shape[2] == 3:  # RGB
+            elif num_channels == 3:  # RGB
+                arr = arr.reshape((frame.height, frame.width, 3))
                 pil_image = Image.fromarray(arr, 'RGB')
+            elif num_channels == 1:  # Grayscale
+                arr = arr.reshape((frame.height, frame.width))
+                pil_image = Image.fromarray(arr, 'L').convert('RGB')
             else:
-                logger.error(f"❌ [Gemini] 不支持的图像格式: {arr.shape}")
+                logger.error(
+                    f"❌ [Gemini] 不支持的通道数: {num_channels} (size={len(arr)}, {frame.width}x{frame.height})")
                 return None
 
             logger.info(f"🔍 [Gemini] 开始分析屏幕内容 ({frame.width}x{frame.height})...")
@@ -355,10 +365,10 @@ class VisionAgent(Agent):
             return None
 
     async def save_gpt_result(
-        self,
-        gpt_result: str,
-        pingback: dict,
-        screen_frame_text: Optional[str] = None
+            self,
+            gpt_result: str,
+            pingback: dict,
+            screen_frame_text: Optional[str] = None
     ) -> bool:
         """
         调用后端 REST API 保存 GPT 生成的结果（并行处理，不阻塞主流程）
@@ -454,26 +464,32 @@ class VisionAgent(Agent):
                 logger.debug("⚠️  [并行] 没有 pingback 数据，跳过视频记忆处理")
                 return
 
-            # 获取屏幕分享帧
-            screen_frame = self._video_frames.get("screen_share")
-            if not screen_frame:
-                logger.debug("⚠️  [并行] 没有屏幕分享帧，跳过处理")
+            # 获取视频帧（优先屏幕分享，其次摄像头）
+            video_frame = self._video_frames.get("screen_share")
+            video_source = "screen_share"
+
+            if not video_frame:
+                video_frame = self._video_frames.get("camera")
+                video_source = "camera"
+
+            if not video_frame:
+                logger.debug("⚠️  [并行] 没有可用的视频帧，跳过处理")
                 return
 
-            logger.info("🔄 [并行] 开始处理视频记忆...")
+            logger.info(f"🔄 [并行] 开始处理视频记忆... (来源: {video_source})")
 
-            # 使用 Gemini 分析屏幕内容
-            screen_analysis = await self.analyze_screen_with_gemini(screen_frame)
+            # 使用 Gemini 分析视频内容
+            video_analysis = await self.analyze_screen_with_gemini(video_frame)
 
-            if not screen_analysis:
+            if not video_analysis:
                 logger.warning("⚠️  [并行] Gemini 分析失败，跳过保存")
                 return
 
             # 调用 saveGptResult API
             success = await self.save_gpt_result(
-                gpt_result=screen_analysis,  # Gemini 分析的结果
+                gpt_result=video_analysis,  # Gemini 分析的结果
                 pingback=self._last_pingback,
-                screen_frame_text=screen_analysis  # 同时作为 screenFrameText
+                screen_frame_text=video_analysis  # 同时作为 screenFrameText
             )
 
             if success:
@@ -485,9 +501,9 @@ class VisionAgent(Agent):
             logger.error(f"❌ [并行] 视频记忆处理异常: {e}", exc_info=True)
 
     async def on_user_turn_completed(
-        self,
-        turn_ctx: llm.ChatContext,
-        new_message: llm.ChatMessage
+            self,
+            turn_ctx: llm.ChatContext,
+            new_message: llm.ChatMessage
     ) -> None:
         """
         在用户完成说话后、LLM 响应前的钩子函数
@@ -636,14 +652,17 @@ class VisionAgent(Agent):
         else:
             logger.warning("⚠️  没有可用的视频帧，仅发送文本内容")
 
-        await super().on_user_turn_completed(turn_ctx, new_message)
-
         # ========== 3. 并行处理：保存视频记忆（不阻塞主流程）==========
-        # 如果有 pingback 数据且有屏幕分享帧，启动后台任务保存记忆
-        if self._last_pingback and self._video_frames.get("screen_share"):
+        # 如果有 pingback 数据且有任一视频帧（屏幕分享或摄像头），启动后台任务保存记忆
+        has_video = self._video_frames.get("screen_share") or self._video_frames.get("camera")
+        # has_video
+        logger.info(f"🔔 检查是否启动视频记忆处理任务: has_video={has_video}, has_pingback={self._last_pingback is not None}")
+        if self._last_pingback and has_video:
             # 创建后台任务，不等待完成（并行处理）
             asyncio.create_task(self.process_video_memory_async())
             logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
+
+        await super().on_user_turn_completed(turn_ctx, new_message)
 
 
 async def entrypoint(ctx: JobContext):
@@ -692,8 +711,8 @@ async def entrypoint(ctx: JobContext):
         # 视频采样器 - 根据用户说话状态自动调整采样频率
         # 用户说话时 1fps，沉默时 0.3fps，平衡性能与成本
         video_sampler=VoiceActivityVideoSampler(
-            speaking_fps=1.0,   # 用户说话时每秒采样 1 帧
-            silent_fps=0.3      # 用户沉默时每秒采样 0.3 帧
+            speaking_fps=1.0,  # 用户说话时每秒采样 1 帧
+            silent_fps=0.3  # 用户沉默时每秒采样 0.3 帧
         ),
     )
 
@@ -705,7 +724,8 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"✅ AgentSession 已启动！")
     logger.info(f"🤖 使用的 Agent 类型: {type(agent).__name__}")
     logger.info(f"🎥 Agent 的活跃视频源: {agent._active_video_sources}")
-    logger.info(f"📹 视频帧状态: camera={agent._video_frames.get('camera') is not None}, screen_share={agent._video_frames.get('screen_share') is not None}")
+    logger.info(
+        f"📹 视频帧状态: camera={agent._video_frames.get('camera') is not None}, screen_share={agent._video_frames.get('screen_share') is not None}")
     logger.info("=" * 80)
 
     # 连接到房间
@@ -714,9 +734,9 @@ async def entrypoint(ctx: JobContext):
     # 订阅视频轨道以捕获视频帧
     @ctx.room.on("track_subscribed")
     def on_track_subscribed(
-        track: rtc.Track,
-        publication: rtc.TrackPublication,
-        participant: rtc.RemoteParticipant,
+            track: rtc.Track,
+            publication: rtc.TrackPublication,
+            participant: rtc.RemoteParticipant,
     ):
         """当订阅到新轨道时的回调"""
         if track.kind == rtc.TrackKind.KIND_VIDEO:
@@ -754,9 +774,9 @@ async def entrypoint(ctx: JobContext):
     for participant in ctx.room.remote_participants.values():
         for publication in participant.track_publications.values():
             if (
-                publication.subscribed
-                and publication.track
-                and publication.track.kind == rtc.TrackKind.KIND_VIDEO
+                    publication.subscribed
+                    and publication.track
+                    and publication.track.kind == rtc.TrackKind.KIND_VIDEO
             ):
                 # 同样判断源类型
                 source = publication.source
@@ -779,7 +799,6 @@ async def entrypoint(ctx: JobContext):
                 )
 
     logger.info("Agent 已成功启动并连接到房间")
-
 
     # ========== 动态调整 Instructions 示例 ==========
     #
@@ -825,9 +844,9 @@ async def entrypoint(ctx: JobContext):
 
 
 async def _process_video_track(
-    track: rtc.VideoTrack,
-    agent: VisionAgent,
-    source_type: str = "camera"
+        track: rtc.VideoTrack,
+        agent: VisionAgent,
+        source_type: str = "camera"
 ):
     """
     处理视频轨道，持续更新最新的视频帧
