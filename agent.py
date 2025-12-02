@@ -336,7 +336,7 @@ class VisionAgent(Agent):
             logger.info(f"🔍 [Gemini] 开始分析屏幕内容 ({frame.width}x{frame.height})...")
 
             # 使用 Gemini Flash 2.5
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel('gemini-2.5-flash')
 
             prompt = (
                 "Please analyze this screen/image carefully. "
