@@ -323,6 +323,9 @@ class VisionAgent(Agent):
                 session_id=session_id
             )
 
+            # 输出返回prompt_result
+            logger.info(f"📥 prompt_result: {json.dumps(prompt_result, ensure_ascii=False)[:500]}...")
+
             if prompt_result:
                 # 获取返回的数据
                 data = prompt_result.get("data", {})
