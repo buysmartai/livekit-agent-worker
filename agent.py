@@ -50,6 +50,8 @@ class VisionAgent(Agent):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        logger.info("🚀 VisionAgent 实例正在初始化...")
+
         # 支持多个视频轨道
         self._video_frames: dict[str, rtc.VideoFrame | None] = {
             "camera": None,      # 摄像头轨道的最新帧
@@ -67,6 +69,8 @@ class VisionAgent(Agent):
         # RAG 相关
         self._memory_store: dict[str, list[str]] = {}  # 简单的内存存储
         self._enable_rag: bool = False  # 是否启用 RAG（已禁用）
+
+        logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._active_video_sources}")
 
     def set_active_video_sources(self, sources: list[str]) -> None:
         """
@@ -90,6 +94,8 @@ class VisionAgent(Agent):
             frame: 视频帧
         """
         self._video_frames[source_type] = frame
+        logger.debug(f"🖼️  更新 {source_type} 视频帧: {frame.width}x{frame.height}")
+
         # 向后兼容：更新 _last_video_frame 为摄像头帧
         if source_type == "camera":
             self._last_video_frame = frame
@@ -173,19 +179,28 @@ class VisionAgent(Agent):
         1. 搜索并注入相关记忆（RAG）
         2. 添加视频帧到消息中（支持多个视频源）
         """
+        logger.info("=" * 80)
+        logger.info("🔔 VisionAgent.on_user_turn_completed 被调用！")
+        logger.info("=" * 80)
+
         # 获取用户文本内容
         user_text = new_message.text_content or ""
+        logger.info(f"📝 用户输入: {user_text}")
 
         # RAG 注入逻辑已临时移除（self._enable_rag=False）。如果需要恢复，请在此处
         # 调用相应的注入函数并启用 _enable_rag。
 
         # 2. 视觉增强：添加活跃视频源的帧
         image_contents = []
-
+        logger.info(f"🎥 活跃视频源: {self._active_video_sources}")
 
         for source_type in self._active_video_sources:
             frame = self._video_frames.get(source_type)
             if frame is not None:
+                logger.info(
+                    f"✅ {source_type} 视频帧已捕获: {frame.width}x{frame.height}"
+                )
+
                 # 创建 ImageContent 并添加描述
                 image_content = llm.ImageContent(
                     image=frame,
@@ -195,12 +210,18 @@ class VisionAgent(Agent):
                 image_contents.append((source_type, image_content))
 
                 logger.info(
-                    f"已添加 {source_type} 视频帧到 LLM 上下文，"
-                    f"分辨率: {frame.width}x{frame.height}"
+                    f"🖼️  {source_type} ImageContent 创建成功，"
+                    f"将以 512x512 分辨率发送到 LLM"
+                )
+            else:
+                logger.warning(
+                    f"⚠️  {source_type} 视频帧未捕获（frame=None）"
                 )
 
         # 将图像添加到用户消息内容中
         if image_contents:
+            logger.info(f"📸 准备将 {len(image_contents)} 个视频源的图像添加到消息")
+
             # 如果有多个图像源，在文本中添加说明
             if len(image_contents) > 1:
                 source_description = "（包含 " + "、".join([s for s, _ in image_contents]) + " 的画面）"
@@ -227,6 +248,14 @@ class VisionAgent(Agent):
                 )
                 if not has_image or len(image_contents) > 1:
                     new_message.content.append(image_content)
+                    logger.info(f"✅ {source_type} 图像已添加到消息内容")
+
+            logger.info(
+                f"🚀 最终消息内容包含: {len([c for c in new_message.content if isinstance(c, str)])} 个文本, "
+                f"{len([c for c in new_message.content if isinstance(c, llm.ImageContent)])} 个图像"
+            )
+        else:
+            logger.warning("⚠️  没有可用的视频帧，仅发送文本内容")
 
 
         await super().on_user_turn_completed(turn_ctx, new_message)
@@ -285,6 +314,14 @@ async def entrypoint(ctx: JobContext):
 
     # 启动会话
     await session.start(agent=agent, room=ctx.room)
+
+    # 验证 Agent 类型和配置
+    logger.info("=" * 80)
+    logger.info(f"✅ AgentSession 已启动！")
+    logger.info(f"🤖 使用的 Agent 类型: {type(agent).__name__}")
+    logger.info(f"🎥 Agent 的活跃视频源: {agent._active_video_sources}")
+    logger.info(f"📹 视频帧状态: camera={agent._video_frames.get('camera') is not None}, screen_share={agent._video_frames.get('screen_share') is not None}")
+    logger.info("=" * 80)
 
     # 连接到房间
     await ctx.connect()
