@@ -287,6 +287,203 @@ class VisionAgent(Agent):
             logger.error(f"❌ getChatPrompt API 调用异常: {e}", exc_info=True)
             return None
 
+    async def analyze_screen_with_gemini(self, frame: rtc.VideoFrame) -> Optional[str]:
+        """
+        使用 Gemini Flash 2.5 多模态模型分析屏幕内容
+
+        Args:
+            frame: 视频帧
+
+        Returns:
+            提取的文本/描述内容，如果失败返回 None
+        """
+        try:
+            import google.generativeai as genai
+            from PIL import Image
+            import numpy as np
+
+            # 配置 Gemini API
+            gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+            if not gemini_api_key:
+                logger.error("❌ [Gemini] GEMINI_API_KEY 未配置")
+                return None
+
+            genai.configure(api_key=gemini_api_key)
+
+            # 将 VideoFrame 转换为 PIL Image
+            arr = np.frombuffer(frame.data, dtype=np.uint8)
+            arr = arr.reshape((frame.height, frame.width, -1))
+
+            # 转换为 RGB（去掉 alpha 通道）
+            if arr.shape[2] == 4:  # RGBA
+                pil_image = Image.fromarray(arr, 'RGBA').convert('RGB')
+            elif arr.shape[2] == 3:  # RGB
+                pil_image = Image.fromarray(arr, 'RGB')
+            else:
+                logger.error(f"❌ [Gemini] 不支持的图像格式: {arr.shape}")
+                return None
+
+            logger.info(f"🔍 [Gemini] 开始分析屏幕内容 ({frame.width}x{frame.height})...")
+
+            # 使用 Gemini Flash 2.5
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+            prompt = (
+                "Please analyze this screen/image carefully. "
+                "Extract all visible text content and describe what's shown in the image. "
+                "Format your response as:\n"
+                "[Text Content]: (all visible text)\n"
+                "[Description]: (what's shown in the image)"
+            )
+
+            response = model.generate_content([prompt, pil_image])
+
+            if response and response.text:
+                result_text = response.text
+                logger.info(f"✅ [Gemini] 分析完成 (前100字): {result_text[:100]}...")
+                return result_text
+            else:
+                logger.warning("⚠️  [Gemini] 未返回内容")
+                return None
+
+        except ImportError as e:
+            logger.error(f"❌ [Gemini] 缺少依赖库: {e}")
+            logger.error("请安装: pip install google-generativeai pillow numpy")
+            return None
+        except Exception as e:
+            logger.error(f"❌ [Gemini] 分析失败: {e}", exc_info=True)
+            return None
+
+    async def save_gpt_result(
+        self,
+        gpt_result: str,
+        pingback: dict,
+        screen_frame_text: Optional[str] = None
+    ) -> bool:
+        """
+        调用后端 REST API 保存 GPT 生成的结果（并行处理，不阻塞主流程）
+
+        Args:
+            gpt_result: LLM 生成的文本（这里是 Gemini 分析的结果）
+            pingback: getChatPrompt 返回的 pingback 数据
+            screen_frame_text: 屏幕分享的文本内容
+
+        Returns:
+            是否保存成功
+        """
+        if not self._http_client:
+            logger.error("❌ [并行] HTTP 客户端未初始化")
+            return False
+
+        if not pingback:
+            logger.warning("⚠️  [并行] 没有 pingback 数据，跳过 saveGptResult")
+            return False
+
+        api_base_url = os.getenv("CHAT_API_BASE_URL", "")
+        api_key = os.getenv("CHAT_API_KEY", "")
+        user_id = os.getenv("USER_ID", "default_user")
+        avatar_id = os.getenv("AVATAR_ID", "default_avatar")
+        session_id = os.getenv("SESSION_ID", "default_session")
+
+        try:
+            request_body = {
+                "reqId": os.urandom(16).hex(),
+                "timezone": os.getenv("TIMEZONE", "Asia/Shanghai"),
+                "appOs": "livekit",
+                "appVersion": "1.0.0",
+                "userLocalTime": datetime.now().isoformat(),
+                "userId": user_id,
+                "avatarId": avatar_id,
+                "agentType": "voice_chat",
+                "chatStatusType": None,
+                "sessionId": session_id,
+                "agentContext": None,
+                "timestamp": int(datetime.now().timestamp() * 1000),
+                "gptResult": gpt_result,
+                "networkResult": None,
+                "screenFrameText": screen_frame_text,
+                "imgPay": "N",
+                "isVipImg": "N",
+                "pingback": pingback
+            }
+
+            logger.info(f"💾 [并行] 调用 saveGptResult API...")
+            logger.info(f"   GPT Result (前50字): {gpt_result[:50]}...")
+            if screen_frame_text:
+                logger.info(f"   Screen Text (前50字): {screen_frame_text[:50]}...")
+
+            response = await self._http_client.post(
+                f"{api_base_url}/chat/saveGptResult",
+                json=request_body,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=5.0
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == "0":
+                    logger.info(f"✅ [并行] saveGptResult 成功")
+                    return True
+                else:
+                    logger.warning(f"⚠️  [并行] 返回错误码: {result.get('code')}")
+                    return False
+            else:
+                logger.error(f"❌ [并行] HTTP {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ [并行] saveGptResult 异常: {e}")
+            return False
+
+    async def process_video_memory_async(self):
+        """
+        异步处理视频记忆（并行任务，不阻塞主流程）
+
+        工作流程：
+        1. 检查是否有屏幕分享帧
+        2. 使用 Gemini Flash 2.5 分析图片内容
+        3. 调用 saveGptResult API 保存
+
+        此方法在后台运行，不影响对话响应速度
+        """
+        try:
+            if not self._last_pingback:
+                logger.debug("⚠️  [并行] 没有 pingback 数据，跳过视频记忆处理")
+                return
+
+            # 获取屏幕分享帧
+            screen_frame = self._video_frames.get("screen_share")
+            if not screen_frame:
+                logger.debug("⚠️  [并行] 没有屏幕分享帧，跳过处理")
+                return
+
+            logger.info("🔄 [并行] 开始处理视频记忆...")
+
+            # 使用 Gemini 分析屏幕内容
+            screen_analysis = await self.analyze_screen_with_gemini(screen_frame)
+
+            if not screen_analysis:
+                logger.warning("⚠️  [并行] Gemini 分析失败，跳过保存")
+                return
+
+            # 调用 saveGptResult API
+            success = await self.save_gpt_result(
+                gpt_result=screen_analysis,  # Gemini 分析的结果
+                pingback=self._last_pingback,
+                screen_frame_text=screen_analysis  # 同时作为 screenFrameText
+            )
+
+            if success:
+                logger.info("✅ [并行] 视频记忆处理完成并已保存")
+            else:
+                logger.warning("⚠️  [并行] 视频记忆保存失败")
+
+        except Exception as e:
+            logger.error(f"❌ [并行] 视频记忆处理异常: {e}", exc_info=True)
+
     async def on_user_turn_completed(
         self,
         turn_ctx: llm.ChatContext,
@@ -439,8 +636,14 @@ class VisionAgent(Agent):
         else:
             logger.warning("⚠️  没有可用的视频帧，仅发送文本内容")
 
-
         await super().on_user_turn_completed(turn_ctx, new_message)
+
+        # ========== 3. 并行处理：保存视频记忆（不阻塞主流程）==========
+        # 如果有 pingback 数据且有屏幕分享帧，启动后台任务保存记忆
+        if self._last_pingback and self._video_frames.get("screen_share"):
+            # 创建后台任务，不等待完成（并行处理）
+            asyncio.create_task(self.process_video_memory_async())
+            logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
 
 
 async def entrypoint(ctx: JobContext):
