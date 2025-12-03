@@ -37,6 +37,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     llm,
+    ConversationItemAddedEvent,
 )
 from livekit.agents.voice import Agent, AgentSession, VoiceActivityVideoSampler, ModelSettings
 from livekit.agents.utils import images
@@ -797,6 +798,76 @@ async def entrypoint(ctx: JobContext):
         ),
     )
 
+    # ========== 注册 conversation_item_added 事件 - 捕获完整 LLM 响应 ==========
+    async def _handle_conversation_item_added(event: ConversationItemAddedEvent):
+        """
+        异步处理对话项添加事件
+        
+        当用户消息或 Agent 响应被添加到对话历史时触发。
+        我们只关心 role="assistant" 的消息，用于保存 GPT 结果到后端。
+        
+        Args:
+            event: ConversationItemAddedEvent，包含 item (ChatMessage)
+        """
+        try:
+            message = event.item
+            
+            # 只处理 assistant 的消息（LLM 响应）
+            if message.role != "assistant":
+                return
+            
+            # 获取完整的响应文本
+            full_response = message.text_content or ""
+            
+            if not full_response:
+                logger.warning("⚠️  conversation_item_added: assistant 响应为空")
+                return
+            
+            logger.info("=" * 60)
+            logger.info("📨 conversation_item_added 触发 - LLM 响应完成")
+            logger.info(f"📝 完整响应 (前200字): {full_response[:200]}...")
+            logger.info(f"📏 响应长度: {len(full_response)} 字符")
+            logger.info(f"🔇 是否被中断: {message.interrupted}")
+            logger.info("=" * 60)
+            
+            # 检查是否有 pingback 数据
+            if not agent._last_pingback:
+                logger.warning("⚠️  没有 pingback 数据，跳过保存")
+                return
+            
+            # 准备用户上下文
+            user_context = {
+                "user_id": os.getenv("USER_ID", "default_user"),
+                "avatar_id": os.getenv("AVATAR_ID", "default_avatar"),
+                "session_id": os.getenv("SESSION_ID", "default_session"),
+                "timezone": os.getenv("TIMEZONE", "Asia/Shanghai")
+            }
+            
+            # 调用 saveGptResult API 保存完整响应
+            success = await agent.save_gpt_result(
+                gpt_result=full_response,
+                pingback=agent._last_pingback,
+                user_context=user_context,
+                screen_frame_text=None  # 如果需要屏幕文本，可以从 agent 获取
+            )
+            
+            if success:
+                logger.info("✅ LLM 完整响应已保存到后端")
+            else:
+                logger.warning("⚠️  保存 LLM 响应失败")
+                
+        except Exception as e:
+            logger.error(f"❌ conversation_item_added 处理异常: {e}", exc_info=True)
+
+    @session.on("conversation_item_added")
+    def on_conversation_item_added(event: ConversationItemAddedEvent):
+        """
+        同步事件回调 - 当对话项被添加到历史时触发
+        
+        LiveKit 事件系统要求使用同步回调，在内部使用 asyncio.create_task 来执行异步操作。
+        """
+        asyncio.create_task(_handle_conversation_item_added(event))
+
     # 启动会话
     await session.start(agent=agent, room=ctx.room)
 
@@ -807,6 +878,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"🎥 Agent 的活跃视频源: {agent._active_video_sources}")
     logger.info(
         f"📹 视频帧状态: camera={agent._video_frames.get('camera') is not None}, screen_share={agent._video_frames.get('screen_share') is not None}")
+    logger.info(f"📡 已注册 conversation_item_added 事件监听")
     logger.info("=" * 80)
 
     # 连接到房间
