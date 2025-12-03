@@ -206,6 +206,9 @@ class VisionAgent(Agent):
         Returns:
             包含 data (messages, maxOutputTokens 等) 和 pingback 的字典，如果失败返回 None
         """
+        import time
+        start_time = time.perf_counter()
+        
         if not self._http_client:
             logger.error("❌ HTTP 客户端未初始化，无法调用 REST API")
             return None
@@ -257,11 +260,14 @@ class VisionAgent(Agent):
                     "Content-Type": "application/json"
                 }
             )
+            
+            elapsed_time = (time.perf_counter() - start_time) * 1000  # 转换为毫秒
+            logger.info(f"⏱️  getChatPrompt API 耗时: {elapsed_time:.2f}ms")
 
             if response.status_code == 200:
                 result = response.json()
                 if result.get("code") == "0":
-                    logger.info(f"✅ 获取动态 prompt 成功")
+                    logger.info(f"✅ 获取动态 prompt 成功 (总耗时: {elapsed_time:.2f}ms)")
 
                     # 返回完整的响应数据
                     return {
@@ -270,18 +276,20 @@ class VisionAgent(Agent):
                         "messages": result.get("messages", [])
                     }
                 else:
-                    logger.warning(f"⚠️  API 返回错误码: {result.get('code')}")
+                    logger.warning(f"⚠️  API 返回错误码: {result.get('code')} (耗时: {elapsed_time:.2f}ms)")
                     return None
             else:
-                logger.error(f"❌ API 请求失败: HTTP {response.status_code}")
+                logger.error(f"❌ API 请求失败: HTTP {response.status_code} (耗时: {elapsed_time:.2f}ms)")
                 logger.error(f"响应内容: {response.text[:200]}")
                 return None
 
         except httpx.TimeoutException:
-            logger.error("❌ getChatPrompt API 超时（10秒）")
+            elapsed_time = (time.perf_counter() - start_time) * 1000
+            logger.error(f"❌ getChatPrompt API 超时（耗时: {elapsed_time:.2f}ms，超过10秒）")
             return None
         except Exception as e:
-            logger.error(f"❌ getChatPrompt API 调用异常: {e}", exc_info=True)
+            elapsed_time = (time.perf_counter() - start_time) * 1000
+            logger.error(f"❌ getChatPrompt API 调用异常 (耗时: {elapsed_time:.2f}ms): {e}", exc_info=True)
             return None
 
     async def analyze_screen_with_gemini(self, frame: rtc.VideoFrame) -> Optional[str]:
