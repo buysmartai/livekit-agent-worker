@@ -338,12 +338,14 @@ class VisionAgent(Agent):
             # 使用 Gemini Flash 2.5
             model = genai.GenerativeModel('gemini-2.5-flash')
 
+            # 注意：user_input 需要从外部传入，这里使用占位符
+            # 实际使用时应该传入用户的问题
+            user_input = getattr(self, '_last_user_input', 'what is on the screen')
             prompt = (
-                "Please analyze this screen/image carefully. "
-                "Extract all visible text content and describe what's shown in the image. "
-                "Format your response as:\n"
-                "[Text Content]: (all visible text)\n"
-                "[Description]: (what's shown in the image)"
+                f'The user is sharing their screen with you and asked "{user_input}".\n'
+                "Extract only the on-screen information that may help answer this question.\n"
+                "Do NOT provide an answer or recommendation.\n"
+                "Output only the extracted information, within 1000 words."
             )
 
             response = model.generate_content([prompt, pil_image])
