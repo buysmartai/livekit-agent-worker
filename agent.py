@@ -293,31 +293,37 @@ class VisionAgent(Agent):
             logger.error(f"❌ getChatPrompt API 调用异常 (耗时: {elapsed_time:.2f}ms): {e}", exc_info=True)
             return None
 
-    async def analyze_screen_with_gemini(self, frame: rtc.VideoFrame) -> Optional[str]:
+    async def analyze_screen(self, frame: rtc.VideoFrame, user_input: str = "") -> Optional[str]:
         """
-        使用 Gemini Flash 2.5 多模态模型分析屏幕内容
+        使用多模态大模型分析屏幕内容
+        
+        支持 OpenAI 兼容 API（如 grok-4-fast-non-reasoning）
 
         Args:
             frame: 视频帧
+            user_input: 用户的问题（用于生成针对性的提取 prompt）
 
         Returns:
             提取的文本/描述内容，如果失败返回 None
         """
         try:
-            import google.generativeai as genai
-            from PIL import Image
+            import base64
 
-            # 配置 Gemini API
-            gemini_api_key = os.getenv("GEMINI_API_KEY", "")
-            if not gemini_api_key:
-                logger.error("❌ [Gemini] GEMINI_API_KEY 未配置")
+            # 从环境变量获取 API 配置
+            base_url = os.getenv("SCREEN_ANALYSIS_API_BASE_URL", "https://147ai.com/v1/")
+            api_key = os.getenv("SCREEN_ANALYSIS_API_KEY", "sk-2KCuGeqtkfreSLIjZHASZBcwYJdZehOqfjuZEemZVsc3jHiy")
+            model = os.getenv("SCREEN_ANALYSIS_MODEL", "grok-4-fast-non-reasoning")
+
+            if not api_key:
+                logger.error("❌ [ScreenAnalysis] API_KEY 未配置")
                 return None
 
-            genai.configure(api_key=gemini_api_key)
+            if not self._http_client:
+                logger.error("❌ [ScreenAnalysis] HTTP 客户端未初始化")
+                return None
 
             # 使用 LiveKit 官方 API 将 VideoFrame 转换为 JPEG bytes
-            # 这会自动处理 YUV/I420 等格式到 RGBA 的转换
-            logger.info(f"🔄 [Gemini] 转换视频帧: {frame.width}x{frame.height}, type={frame.type}")
+            logger.info(f"🔄 [ScreenAnalysis] 转换视频帧: {frame.width}x{frame.height}, type={frame.type}")
 
             encode_options = images.EncodeOptions(
                 format="JPEG",
@@ -330,17 +336,13 @@ class VisionAgent(Agent):
             )
             jpeg_bytes = images.encode(frame, encode_options)
 
-            # 从 JPEG bytes 创建 PIL Image
-            pil_image = Image.open(io.BytesIO(jpeg_bytes))
+            # 将图片转换为 base64
+            image_base64 = base64.b64encode(jpeg_bytes).decode('utf-8')
 
-            logger.info(f"🔍 [Gemini] 开始分析屏幕内容 ({pil_image.width}x{pil_image.height})...")
-
-            # 使用 Gemini Flash 2.5
-            model = genai.GenerativeModel('gemini-2.5-flash')
-
-            # 注意：user_input 需要从外部传入，这里使用占位符
-            # 实际使用时应该传入用户的问题
-            user_input = getattr(self, '_last_user_input', 'what is on the screen')
+            # 构建 prompt
+            if not user_input:
+                user_input = getattr(self, '_last_user_input', 'what is on the screen')
+            
             prompt = (
                 f'The user is sharing their screen with you and asked "{user_input}".\n'
                 "Extract only the on-screen information that may help answer this question.\n"
@@ -348,22 +350,67 @@ class VisionAgent(Agent):
                 "Output only the extracted information, within 1000 words."
             )
 
-            response = model.generate_content([prompt, pil_image])
+            logger.info(f"🔍 [ScreenAnalysis] 开始分析屏幕内容 (model={model})...")
 
-            if response and response.text:
-                result_text = response.text
-                logger.info(f"✅ [Gemini] 分析完成 (前100字): {result_text[:100]}...")
-                return result_text
+            # 构建 OpenAI 兼容的请求
+            request_body = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_base64}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 1500
+            }
+
+            # 确保 base_url 以 / 结尾
+            if not base_url.endswith('/'):
+                base_url += '/'
+
+            # 发送请求
+            response = await self._http_client.post(
+                f"{base_url}chat/completions",
+                json=request_body,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30.0  # 图片分析可能需要更长时间
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                # 提取响应内容
+                if result.get("choices") and len(result["choices"]) > 0:
+                    result_text = result["choices"][0].get("message", {}).get("content", "")
+                    if result_text:
+                        logger.info(f"✅ [ScreenAnalysis] 分析完成 (前100字): {result_text[:100]}...")
+                        return result_text
+                    else:
+                        logger.warning("⚠️  [ScreenAnalysis] 返回内容为空")
+                        return None
+                else:
+                    logger.warning("⚠️  [ScreenAnalysis] 未返回有效的 choices")
+                    return None
             else:
-                logger.warning("⚠️  [Gemini] 未返回内容")
+                logger.error(f"❌ [ScreenAnalysis] API 请求失败: HTTP {response.status_code}")
+                logger.error(f"响应内容: {response.text[:200]}")
                 return None
 
-        except ImportError as e:
-            logger.error(f"❌ [Gemini] 缺少依赖库: {e}")
-            logger.error("请安装: pip install google-generativeai pillow")
-            return None
         except Exception as e:
-            logger.error(f"❌ [Gemini] 分析失败: {e}", exc_info=True)
+            logger.error(f"❌ [ScreenAnalysis] 分析失败: {e}", exc_info=True)
             return None
 
     async def save_gpt_result(
@@ -489,11 +536,11 @@ class VisionAgent(Agent):
 
             logger.info(f"🔄 [并行] 开始处理视频记忆... (来源: {video_source})")
 
-            # 使用 Gemini 分析视频内容
-            video_analysis = await self.analyze_screen_with_gemini(video_frame)
+            # 使用多模态模型分析视频内容
+            video_analysis = await self.analyze_screen(video_frame)
 
             if not video_analysis:
-                logger.warning("⚠️  [并行] Gemini 分析失败，跳过保存")
+                logger.warning("⚠️  [并行] 屏幕分析失败，跳过保存")
                 return
 
             # 调用 saveGptResult API（使用快照的 pingback 和 user_context）
