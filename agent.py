@@ -70,11 +70,18 @@ class VisionAgent(Agent):
     - RAG 记忆增强
     - 动态 prompt 注入
     - 多轨道视频支持（摄像头 + 屏幕分享）
+    - 从房间名称解析用户信息（格式：{userId}_{avatarId}_{timestamp}）
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         logger.info("🚀 VisionAgent 实例正在初始化...")
+
+        # ========== 用户信息（从房间名称解析） ==========
+        self._user_id: str = "default_user"
+        self._avatar_id: str = "default_avatar"
+        self._session_id: str = "default_session"  # 使用时间戳作为 session_id
+        self._room_name: str = ""
 
         # 支持多个视频轨道
         self._video_frames: dict[str, rtc.VideoFrame | None] = {
@@ -107,6 +114,77 @@ class VisionAgent(Agent):
             logger.info("✅ HTTP 客户端已初始化")
 
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._active_video_sources}")
+
+    def set_user_info_from_room_name(self, room_name: str) -> bool:
+        """
+        从房间名称解析用户信息
+        
+        房间名称格式: {userId}_{avatarId}_{timestamp}
+        例如: abc123_def456_1701590400
+        
+        Args:
+            room_name: 房间名称
+            
+        Returns:
+            是否解析成功
+        """
+        self._room_name = room_name
+        
+        if not room_name:
+            logger.warning("⚠️  房间名称为空，使用默认用户信息")
+            return False
+        
+        try:
+            parts = room_name.split('_')
+            
+            if len(parts) >= 3:
+                # 格式: userId_avatarId_timestamp
+                self._user_id = parts[0]
+                self._avatar_id = parts[1]
+                # 时间戳部分可能包含额外信息，取第三部分作为 session_id
+                self._session_id = '_'.join(parts[2:])  # 支持时间戳后面可能有其他内容
+                
+                logger.info(f"✅ 从房间名称解析用户信息成功:")
+                logger.info(f"   📛 房间名称: {room_name}")
+                logger.info(f"   👤 user_id: {self._user_id}")
+                logger.info(f"   🎭 avatar_id: {self._avatar_id}")
+                logger.info(f"   🔑 session_id: {self._session_id}")
+                return True
+            elif len(parts) == 2:
+                # 兼容格式: userId_avatarId（没有时间戳）
+                self._user_id = parts[0]
+                self._avatar_id = parts[1]
+                self._session_id = str(int(datetime.now().timestamp()))
+                
+                logger.warning(f"⚠️  房间名称只有2段，自动生成 session_id:")
+                logger.info(f"   👤 user_id: {self._user_id}")
+                logger.info(f"   🎭 avatar_id: {self._avatar_id}")
+                logger.info(f"   🔑 session_id: {self._session_id} (自动生成)")
+                return True
+            else:
+                # 无法解析，使用房间名称作为 session_id
+                logger.warning(f"⚠️  无法解析房间名称 '{room_name}'，格式不符合 userId_avatarId_timestamp")
+                self._session_id = room_name
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ 解析房间名称异常: {e}")
+            return False
+
+    def get_user_context(self) -> dict:
+        """
+        获取用户上下文信息
+        
+        Returns:
+            包含 user_id, avatar_id, session_id, timezone 的字典
+        """
+        return {
+            "user_id": self._user_id,
+            "avatar_id": self._avatar_id,
+            "session_id": self._session_id,
+            "timezone": os.getenv("TIMEZONE", "Asia/Shanghai"),
+            "room_name": self._room_name
+        }
 
     def _manual_update_chat_ctx_system(self, chat_ctx: llm.ChatContext, system_text: str) -> None:
         """
@@ -606,18 +684,14 @@ class VisionAgent(Agent):
         user_text = user_message.text_content or ""
         logger.info(f"📝 用户输入: {user_text}")
 
-        # 准备用户上下文（用于后续 API 调用）
-        user_id = os.getenv("USER_ID", "default_user")
-        avatar_id = os.getenv("AVATAR_ID", "default_avatar")
-        session_id = os.getenv("SESSION_ID", "default_session")
-        timezone = os.getenv("TIMEZONE", "Asia/Shanghai")
-
-        user_context = {
-            "user_id": user_id,
-            "avatar_id": avatar_id,
-            "session_id": session_id,
-            "timezone": timezone
-        }
+        # 从实例变量获取用户上下文（已从房间名称解析）
+        user_context = self.get_user_context()
+        user_id = user_context["user_id"]
+        avatar_id = user_context["avatar_id"]
+        session_id = user_context["session_id"]
+        timezone = user_context["timezone"]
+        
+        logger.info(f"👤 用户上下文: user_id={user_id}, avatar_id={avatar_id}, session_id={session_id}")
 
         pingback: dict | None = None
 
@@ -797,14 +871,26 @@ async def entrypoint(ctx: JobContext):
     Agent 入口函数
     
     当 LiveKit 房间创建或 Agent 被调用时，该函数会被执行。
+    
+    房间名称格式: {userId}_{avatarId}_{timestamp}
+    例如: abc123_def456_1701590400
     """
-    logger.info(f"连接到房间: {ctx.room.name}")
+    room_name = ctx.room.name
+    logger.info("=" * 80)
+    logger.info(f"🏠 连接到房间: {room_name}")
+    logger.info("=" * 80)
 
     # 创建支持视觉分析的 Agent 实例
     # instructions 参数定义了助手的行为和角色
     agent = VisionAgent(
         instructions=()
     )
+    
+    # ========== 从房间名称解析用户信息 ==========
+    # 房间名称格式: {userId}_{avatarId}_{timestamp}
+    parse_success = agent.set_user_info_from_room_name(room_name)
+    if not parse_success:
+        logger.warning(f"⚠️  房间名称 '{room_name}' 解析失败，将使用默认用户信息")
 
     # 创建 Agent 会话，配置语音和语言模型组件
     session = AgentSession(
@@ -884,13 +970,9 @@ async def entrypoint(ctx: JobContext):
                 logger.warning("⚠️  没有 pingback 数据，跳过保存")
                 return
             
-            # 准备用户上下文
-            user_context = {
-                "user_id": os.getenv("USER_ID", "default_user"),
-                "avatar_id": os.getenv("AVATAR_ID", "default_avatar"),
-                "session_id": os.getenv("SESSION_ID", "default_session"),
-                "timezone": os.getenv("TIMEZONE", "Asia/Shanghai")
-            }
+            # 从 Agent 实例获取用户上下文（已从房间名称解析）
+            user_context = agent.get_user_context()
+            logger.info(f"👤 使用用户上下文: user_id={user_context['user_id']}, avatar_id={user_context['avatar_id']}")
             
             # 调用 saveGptResult API 保存完整响应
             success = await agent.save_gpt_result(
