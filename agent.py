@@ -21,6 +21,8 @@ import os
 from typing import Optional, AsyncIterable, Any
 import json
 from datetime import datetime
+from livekit.plugins import elevenlabs
+from livekit.plugins.elevenlabs import VoiceSettings
 
 # HTTP 客户端 - 用于调用 REST API
 try:
@@ -757,11 +759,21 @@ async def entrypoint(ctx: JobContext):
         ),
 
         # 语音合成 (TTS) - 使用阿里云 CosyVoice 语音合成
-        tts=aliyun.TTS(
-            model="cosyvoice-v2",  # CosyVoice v2 模型
-            voice="Longwan_v2",  # 语音类型：龙城
-            speech_rate=1,  # 语速：1.0 为正常速度 (0.5-2.0)
-            # 注意：当前版本的 aliyun.TTS 不支持 pitch_rate 和 volume 参数
+        # tts=aliyun.TTS(
+        #     model="cosyvoice-v2",  # CosyVoice v2 模型
+        #     voice="Longwan_v2",  # 语音类型：龙城
+        #     speech_rate=1,  # 语速：1.0 为正常速度 (0.5-2.0)
+        #     # 注意：当前版本的 aliyun.TTS 不支持 pitch_rate 和 volume 参数
+        # ),
+        tts=elevenlabs.TTS(
+            voice_id="tQ4MEZFJOzsahSEEZtHK",
+            model="eleven_turbo_v2_5",
+            voice_settings=VoiceSettings(
+                stability=0.5,              # 稳定性 (0.0-1.0)
+                similarity_boost=0.75,      # 相似度 (0.0-1.0)
+                speed=1.2,                  # 语速 (0.8-1.2) - 设置为最快
+                use_speaker_boost=True      # 使用说话人增强
+            ),
         ),
 
         # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型
