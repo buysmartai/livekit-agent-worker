@@ -786,6 +786,7 @@ async def entrypoint(ctx: JobContext):
         llm=google.LLM(
             model="gemini-2.5-flash",  # Gemini 2.0 Flash 支持图像/视频输入
             # 其他可选模型：gemini-1.5-pro, gemini-1.5-flash
+            thinking_config={"thinking_budget": 0},  # 禁用思考模式
         ),
 
         # 视频采样器 - 根据用户说话状态自动调整采样频率
