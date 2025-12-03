@@ -581,62 +581,6 @@ class VisionAgent(Agent):
             logger.error(f"❌ [并行] saveGptResult 异常: {e}")
             return False
 
-    async def process_video_memory_async(
-            self,
-            pingback: dict,
-            user_context: dict,
-            video_frame: rtc.VideoFrame,
-            video_source: str
-    ):
-        """
-        异步处理视频记忆（并行任务，不阻塞主流程）
-
-        Args:
-            pingback: getChatPrompt 返回的 pingback 数据（快照，避免竞态条件）
-            user_context: 用户上下文（userId, avatarId, sessionId 等）
-            video_frame: 要分析的视频帧（快照）
-            video_source: 视频来源 ("camera" 或 "screen_share")
-
-        工作流程：
-        1. 使用 Gemini Flash 2.5 分析图片内容
-        2. 调用 saveGptResult API 保存
-
-        此方法在后台运行，不影响对话响应速度
-        """
-        try:
-            if not pingback:
-                logger.debug("⚠️  [并行] 没有 pingback 数据，跳过视频记忆处理")
-                return
-
-            if not video_frame:
-                logger.debug("⚠️  [并行] 没有可用的视频帧，跳过处理")
-                return
-
-            logger.info(f"🔄 [并行] 开始处理视频记忆... (来源: {video_source})")
-
-            # 使用多模态模型分析视频内容
-            video_analysis = await self.analyze_screen(video_frame)
-
-            if not video_analysis:
-                logger.warning("⚠️  [并行] 屏幕分析失败，跳过保存")
-                return
-
-            # 调用 saveGptResult API（使用快照的 pingback 和 user_context）
-            success = await self.save_gpt_result(
-                gpt_result=video_analysis,
-                pingback=pingback,
-                user_context=user_context,
-                screen_frame_text=video_analysis
-            )
-
-            if success:
-                logger.info("✅ [并行] 视频记忆处理完成并已保存")
-            else:
-                logger.warning("⚠️  [并行] 视频记忆保存失败")
-
-        except Exception as e:
-            logger.error(f"❌ [并行] 视频记忆处理异常: {e}", exc_info=True)
-
     async def llm_node(
             self,
             chat_ctx: llm.ChatContext,
@@ -974,12 +918,27 @@ async def entrypoint(ctx: JobContext):
             user_context = agent.get_user_context()
             logger.info(f"👤 使用用户上下文: user_id={user_context['user_id']}, avatar_id={user_context['avatar_id']}")
             
+            # 获取屏幕分析内容（如果有屏幕分享帧）
+            screen_frame_text = None
+            screen_frame = agent._video_frames.get("screen_share")
+            if screen_frame:
+                logger.info("🖥️  检测到屏幕分享帧，开始分析...")
+                screen_frame_text = await agent.analyze_screen(screen_frame)
+                if screen_frame_text:
+                    logger.info(f"✅ 屏幕分析完成 (前100字): {screen_frame_text[:100]}...")
+                else:
+                    logger.warning("⚠️  屏幕分析失败或返回空")
+            else:
+                logger.info("📷 没有屏幕分享帧，screen_frame_text 为空")
+            
             # 调用 saveGptResult API 保存完整响应
+            # gpt_result: Agent LLM（Gemini）对用户的回复
+            # screen_frame_text: 屏幕分析的结果
             success = await agent.save_gpt_result(
                 gpt_result=full_response,
                 pingback=agent._last_pingback,
                 user_context=user_context,
-                screen_frame_text=None  # 如果需要屏幕文本，可以从 agent 获取
+                screen_frame_text=screen_frame_text
             )
             
             if success:
