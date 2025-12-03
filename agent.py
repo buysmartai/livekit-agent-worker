@@ -730,8 +730,6 @@ class VisionAgent(Agent):
         #     )
         #     logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
 
-        # ========== 5. 调用默认的 LLM 处理 ==========
-        logger.info("🤖 调用默认 LLM 处理...")
         async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
             yield chunk
 
