@@ -18,7 +18,7 @@ import io
 import logging
 from dotenv import load_dotenv
 import os
-from typing import Optional
+from typing import Optional, AsyncIterable, Any
 import json
 from datetime import datetime
 
@@ -36,9 +36,17 @@ from livekit.agents import (
     cli,
     llm,
 )
-from livekit.agents.voice import Agent, AgentSession, VoiceActivityVideoSampler
+from livekit.agents.voice import Agent, AgentSession, VoiceActivityVideoSampler, ModelSettings
 from livekit.agents.utils import images
 from livekit.plugins import aliyun
+
+# 尝试导入 update_instructions 函数（用于直接修改 chat_ctx）
+try:
+    from livekit.agents.voice.generation import update_instructions as sdk_update_instructions
+    HAS_SDK_UPDATE_INSTRUCTIONS = True
+except ImportError:
+    HAS_SDK_UPDATE_INSTRUCTIONS = False
+    logging.warning("⚠️  无法导入 sdk_update_instructions，将使用手动方式更新 chat_ctx")
 
 # 配置日志
 logging.basicConfig(
@@ -96,6 +104,35 @@ class VisionAgent(Agent):
             logger.info("✅ HTTP 客户端已初始化")
 
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._active_video_sources}")
+
+    def _manual_update_chat_ctx_system(self, chat_ctx: llm.ChatContext, system_text: str) -> None:
+        """
+        手动更新 chat_ctx 中的 system message
+        
+        当 SDK 的 update_instructions 函数不可用时使用此方法
+        
+        Args:
+            chat_ctx: 对话上下文
+            system_text: 新的 system prompt 文本
+        """
+        # 查找并替换现有的 system message
+        found_system = False
+        for i, item in enumerate(chat_ctx.items):
+            if isinstance(item, llm.ChatMessage) and item.role == "system":
+                # 直接修改 content
+                item.content = [system_text]
+                found_system = True
+                logger.info(f"✅ 已手动更新 chat_ctx 中的 system message (index={i})")
+                break
+        
+        # 如果没有找到 system message，在开头插入一个新的
+        if not found_system:
+            new_system_msg = llm.ChatMessage(
+                role="system",
+                content=[system_text]
+            )
+            chat_ctx.items.insert(0, new_system_msg)
+            logger.info("✅ 已在 chat_ctx 开头插入新的 system message")
 
     def set_active_video_sources(self, sources: list[str]) -> None:
         """
@@ -320,6 +357,7 @@ class VisionAgent(Agent):
             self,
             gpt_result: str,
             pingback: dict,
+            user_context: Optional[dict] = None,
             screen_frame_text: Optional[str] = None
     ) -> bool:
         """
@@ -328,6 +366,7 @@ class VisionAgent(Agent):
         Args:
             gpt_result: LLM 生成的文本（这里是 Gemini 分析的结果）
             pingback: getChatPrompt 返回的 pingback 数据
+            user_context: 用户上下文（包含 userId, avatarId, sessionId, timezone）
             screen_frame_text: 屏幕分享的文本内容
 
         Returns:
@@ -343,14 +382,18 @@ class VisionAgent(Agent):
 
         api_base_url = os.getenv("CHAT_API_BASE_URL", "")
         api_key = os.getenv("CHAT_API_KEY", "")
-        user_id = os.getenv("USER_ID", "default_user")
-        avatar_id = os.getenv("AVATAR_ID", "default_avatar")
-        session_id = os.getenv("SESSION_ID", "default_session")
+        
+        # 使用传入的 user_context，如果没有则从环境变量获取
+        ctx = user_context or {}
+        user_id = ctx.get("user_id", os.getenv("USER_ID", "default_user"))
+        avatar_id = ctx.get("avatar_id", os.getenv("AVATAR_ID", "default_avatar"))
+        session_id = ctx.get("session_id", os.getenv("SESSION_ID", "default_session"))
+        timezone = ctx.get("timezone", os.getenv("TIMEZONE", "Asia/Shanghai"))
 
         try:
             request_body = {
                 "reqId": os.urandom(16).hex(),
-                "timezone": os.getenv("TIMEZONE", "Asia/Shanghai"),
+                "timezone": timezone,
                 "appOs": "livekit",
                 "appVersion": "1.0.0",
                 "userLocalTime": datetime.now().isoformat(),
@@ -400,29 +443,32 @@ class VisionAgent(Agent):
             logger.error(f"❌ [并行] saveGptResult 异常: {e}")
             return False
 
-    async def process_video_memory_async(self):
+    async def process_video_memory_async(
+            self,
+            pingback: dict,
+            user_context: dict,
+            video_frame: rtc.VideoFrame,
+            video_source: str
+    ):
         """
         异步处理视频记忆（并行任务，不阻塞主流程）
 
+        Args:
+            pingback: getChatPrompt 返回的 pingback 数据（快照，避免竞态条件）
+            user_context: 用户上下文（userId, avatarId, sessionId 等）
+            video_frame: 要分析的视频帧（快照）
+            video_source: 视频来源 ("camera" 或 "screen_share")
+
         工作流程：
-        1. 检查是否有屏幕分享帧
-        2. 使用 Gemini Flash 2.5 分析图片内容
-        3. 调用 saveGptResult API 保存
+        1. 使用 Gemini Flash 2.5 分析图片内容
+        2. 调用 saveGptResult API 保存
 
         此方法在后台运行，不影响对话响应速度
         """
         try:
-            if not self._last_pingback:
+            if not pingback:
                 logger.debug("⚠️  [并行] 没有 pingback 数据，跳过视频记忆处理")
                 return
-
-            # 获取视频帧（优先屏幕分享，其次摄像头）
-            video_frame = self._video_frames.get("screen_share")
-            video_source = "screen_share"
-
-            if not video_frame:
-                video_frame = self._video_frames.get("camera")
-                video_source = "camera"
 
             if not video_frame:
                 logger.debug("⚠️  [并行] 没有可用的视频帧，跳过处理")
@@ -437,11 +483,12 @@ class VisionAgent(Agent):
                 logger.warning("⚠️  [并行] Gemini 分析失败，跳过保存")
                 return
 
-            # 调用 saveGptResult API
+            # 调用 saveGptResult API（使用快照的 pingback 和 user_context）
             success = await self.save_gpt_result(
-                gpt_result=video_analysis,  # Gemini 分析的结果
-                pingback=self._last_pingback,
-                screen_frame_text=video_analysis  # 同时作为 screenFrameText
+                gpt_result=video_analysis,
+                pingback=pingback,
+                user_context=user_context,
+                screen_frame_text=video_analysis
             )
 
             if success:
@@ -452,35 +499,70 @@ class VisionAgent(Agent):
         except Exception as e:
             logger.error(f"❌ [并行] 视频记忆处理异常: {e}", exc_info=True)
 
-
-
-    async def on_user_turn_completed(
+    async def llm_node(
             self,
-            turn_ctx: llm.ChatContext,
-            new_message: llm.ChatMessage
-    ) -> None:
+            chat_ctx: llm.ChatContext,
+            tools: list[llm.FunctionTool],
+            model_settings: ModelSettings,
+    ) -> AsyncIterable[llm.ChatChunk | str]:
         """
-        在用户完成说话后、LLM 响应前的钩子函数
+        LLM 节点 - 拦截所有用户输入（语音 + 文字）
+
+        这是 Agent pipeline 中处理 LLM 推理的核心节点。
+        无论用户是通过语音还是文字输入，都会经过这个方法。
 
         功能：
-        1. 搜索并注入相关记忆（RAG）
-        2. 添加视频帧到消息中（支持多个视频源）
+        1. 调用 REST API 获取动态 prompt
+        2. 动态更新 system instructions
+        3. 添加视频帧到用户消息
+        4. 启动后台视频记忆处理任务
+        5. 调用默认的 LLM 处理
+
+        Args:
+            chat_ctx: 对话上下文，包含所有历史消息
+            tools: 可用的工具列表
+            model_settings: 模型设置
+
+        Yields:
+            LLM 生成的内容块
         """
         logger.info("=" * 80)
-        logger.info("🔔 VisionAgent.on_user_turn_completed 被调用！")
+        logger.info("🔔 VisionAgent.llm_node 被调用！（拦截所有用户输入）")
         logger.info("=" * 80)
 
-        # 获取用户文本内容
-        user_text = new_message.text_content or ""
+        # ========== 1. 查找最新的用户消息 ==========
+        user_message: llm.ChatMessage | None = None
+        for item in reversed(chat_ctx.items):
+            if isinstance(item, llm.ChatMessage) and item.role == "user":
+                user_message = item
+                break
+
+        if not user_message:
+            logger.warning("⚠️  未找到用户消息，直接调用默认 LLM")
+            async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
+                yield chunk
+            return
+
+        user_text = user_message.text_content or ""
         logger.info(f"📝 用户输入: {user_text}")
 
-        # ========== 1. 调用 REST API 获取动态 prompt ==========
-        if self._http_client:
-            # 从环境变量或上下文获取用户信息
-            user_id = os.getenv("USER_ID", "default_user")
-            avatar_id = os.getenv("AVATAR_ID", "default_avatar")
-            session_id = os.getenv("SESSION_ID", "default_session")
+        # 准备用户上下文（用于后续 API 调用）
+        user_id = os.getenv("USER_ID", "default_user")
+        avatar_id = os.getenv("AVATAR_ID", "default_avatar")
+        session_id = os.getenv("SESSION_ID", "default_session")
+        timezone = os.getenv("TIMEZONE", "Asia/Shanghai")
 
+        user_context = {
+            "user_id": user_id,
+            "avatar_id": avatar_id,
+            "session_id": session_id,
+            "timezone": timezone
+        }
+
+        pingback: dict | None = None
+
+        # ========== 2. 调用 REST API 获取动态 prompt ==========
+        if self._http_client:
             logger.info(f"🔄 准备调用 getChatPrompt API...")
 
             prompt_result = await self.get_dynamic_prompt(
@@ -490,16 +572,15 @@ class VisionAgent(Agent):
                 session_id=session_id
             )
 
-            # 输出返回prompt_result
-            logger.info(f"📥 prompt_result: {json.dumps(prompt_result, ensure_ascii=False)[:500]}...")
-
             if prompt_result:
+                logger.info(f"📥 prompt_result: {json.dumps(prompt_result, ensure_ascii=False)[:500]}...")
+
                 # 获取返回的数据
                 data = prompt_result.get("data", {})
                 pingback = prompt_result.get("pingback", {})
                 api_messages = data.get("messages", [])
 
-                # 保存 pingback 数据（用于后续调用 saveGptResult）
+                # 保存 pingback 数据（也存一份到实例变量，用于兼容）
                 self._last_pingback = pingback
                 prompt_id = pingback.get("promptId", "N/A")
                 logger.info(f"💾 保存 pingback 数据，promptId={prompt_id}")
@@ -528,9 +609,25 @@ class VisionAgent(Agent):
                             if system_text:
                                 logger.info(f"🎭 动态更新 system prompt (前100字): {system_text[:100]}...")
 
-                                # 使用 update_instructions 更新 Agent 的 system prompt
+                                # ===== 关键修复：直接修改当前 chat_ctx 的 system message =====
+                                # self.update_instructions() 只会影响后续轮次，不会影响当前 chat_ctx
+                                # 所以需要直接修改传入的 chat_ctx
+                                
+                                if HAS_SDK_UPDATE_INSTRUCTIONS:
+                                    # 方法1: 使用 SDK 提供的函数
+                                    try:
+                                        sdk_update_instructions(chat_ctx, instructions=system_text, add_if_missing=True)
+                                        logger.info("✅ 已通过 SDK 函数更新 chat_ctx 的 system prompt")
+                                    except Exception as e:
+                                        logger.warning(f"⚠️  SDK update_instructions 失败: {e}，尝试手动更新")
+                                        self._manual_update_chat_ctx_system(chat_ctx, system_text)
+                                else:
+                                    # 方法2: 手动遍历并修改 chat_ctx.items
+                                    self._manual_update_chat_ctx_system(chat_ctx, system_text)
+                                
+                                # 同时更新 Agent 内部状态（影响后续轮次）
                                 await self.update_instructions(system_text)
-                                logger.info("✅ System prompt 已动态更新")
+                                logger.info("✅ System prompt 已动态更新（当前轮次 + 后续轮次）")
 
                 # 可选：记录其他配置信息
                 max_tokens = data.get("maxOutputTokens", "N/A")
@@ -539,9 +636,13 @@ class VisionAgent(Agent):
             else:
                 logger.warning("⚠️  未能获取动态 prompt，使用默认配置")
 
-        # ========== 2. 视觉增强：添加活跃视频源的帧 ==========
+        # ========== 3. 视觉增强：添加活跃视频源的帧到用户消息 ==========
         image_contents = []
         logger.info(f"🎥 活跃视频源: {self._active_video_sources}")
+
+        # 用于后台任务的视频帧快照
+        video_frame_for_memory: rtc.VideoFrame | None = None
+        video_source_for_memory: str = ""
 
         for source_type in self._active_video_sources:
             frame = self._video_frames.get(source_type)
@@ -549,6 +650,11 @@ class VisionAgent(Agent):
                 logger.info(
                     f"✅ {source_type} 视频帧已捕获: {frame.width}x{frame.height}"
                 )
+
+                # 保存用于后台任务的视频帧（优先屏幕分享）
+                if source_type == "screen_share" or not video_frame_for_memory:
+                    video_frame_for_memory = frame
+                    video_source_for_memory = source_type
 
                 # 创建 ImageContent 并添加描述
                 image_content = llm.ImageContent(
@@ -574,49 +680,58 @@ class VisionAgent(Agent):
             # 如果有多个图像源，在文本中添加说明
             if len(image_contents) > 1:
                 source_description = "（包含 " + "、".join([s for s, _ in image_contents]) + " 的画面）"
-                if isinstance(new_message.content, str):
-                    new_message.content = [new_message.content + source_description]
-                elif isinstance(new_message.content, list):
+                if isinstance(user_message.content, str):
+                    user_message.content = [user_message.content + source_description]
+                elif isinstance(user_message.content, list):
                     # 修改第一个文本内容
-                    for i, c in enumerate(new_message.content):
+                    for i, c in enumerate(user_message.content):
                         if isinstance(c, str):
-                            new_message.content[i] = c + source_description
+                            user_message.content[i] = c + source_description
                             break
 
             # 转换为列表格式
-            if isinstance(new_message.content, str):
-                new_message.content = [new_message.content]
-            elif not isinstance(new_message.content, list):
-                new_message.content = []
+            if isinstance(user_message.content, str):
+                user_message.content = [user_message.content]
+            elif not isinstance(user_message.content, list):
+                user_message.content = []
 
             # 添加所有图像内容
             for source_type, image_content in image_contents:
                 # 检查是否已经添加了该源的图片（避免重复）
                 has_image = any(
-                    isinstance(c, llm.ImageContent) for c in new_message.content
+                    isinstance(c, llm.ImageContent) for c in user_message.content
                 )
                 if not has_image or len(image_contents) > 1:
-                    new_message.content.append(image_content)
+                    user_message.content.append(image_content)
                     logger.info(f"✅ {source_type} 图像已添加到消息内容")
 
             logger.info(
-                f"🚀 最终消息内容包含: {len([c for c in new_message.content if isinstance(c, str)])} 个文本, "
-                f"{len([c for c in new_message.content if isinstance(c, llm.ImageContent)])} 个图像"
+                f"🚀 最终消息内容包含: {len([c for c in user_message.content if isinstance(c, str)])} 个文本, "
+                f"{len([c for c in user_message.content if isinstance(c, llm.ImageContent)])} 个图像"
             )
         else:
             logger.warning("⚠️  没有可用的视频帧，仅发送文本内容")
 
-        # ========== 3. 并行处理：保存视频记忆（不阻塞主流程）==========
-        # 如果有 pingback 数据且有任一视频帧（屏幕分享或摄像头），启动后台任务保存记忆
-        has_video = self._video_frames.get("screen_share") or self._video_frames.get("camera")
-        # has_video
-        logger.info(f"🔔 检查是否启动视频记忆处理任务: has_video={has_video}, has_pingback={self._last_pingback is not None}")
-        if self._last_pingback and has_video:
-            # 创建后台任务，不等待完成（并行处理）
-            asyncio.create_task(self.process_video_memory_async())
+        # ========== 4. 并行处理：保存视频记忆（不阻塞主流程）==========
+        # 如果有 pingback 数据且有视频帧，启动后台任务保存记忆
+        # 注意：传入快照数据，避免竞态条件
+        logger.info(f"🔔 检查是否启动视频记忆处理任务: has_video={video_frame_for_memory is not None}, has_pingback={pingback is not None}")
+        if pingback and video_frame_for_memory:
+            # 创建后台任务，传入快照数据（不等待完成）
+            asyncio.create_task(
+                self.process_video_memory_async(
+                    pingback=pingback.copy(),  # 传入 pingback 的拷贝
+                    user_context=user_context.copy(),  # 传入用户上下文的拷贝
+                    video_frame=video_frame_for_memory,  # 传入视频帧快照
+                    video_source=video_source_for_memory
+                )
+            )
             logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
 
-        await super().on_user_turn_completed(turn_ctx, new_message)
+        # ========== 5. 调用默认的 LLM 处理 ==========
+        logger.info("🤖 调用默认 LLM 处理...")
+        async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
+            yield chunk
 
 
 async def entrypoint(ctx: JobContext):
