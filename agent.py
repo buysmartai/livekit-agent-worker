@@ -554,11 +554,11 @@ class VisionAgent(Agent):
             }
 
             logger.info(f"💾 [并行] 调用 saveGptResult API...")
-            logger.info(f"   GPT Result (前50字): {gpt_result[:50]}...")
+            logger.info(f"   GPT Result (前150字): {gpt_result[:150]}...")
             if screen_frame_text:
-                logger.info(f"   Screen Text (前50字): {screen_frame_text[:50]}...")
+                logger.info(f"   Screen Text (前150字): {screen_frame_text[:150]}...")
             if camera_frame_text:
-                logger.info(f"   Camera Text (前50字): {camera_frame_text[:50]}...")
+                logger.info(f"   Camera Text (前150字): {camera_frame_text[:150]}...")
 
             response = await self._http_client.post(
                 f"{api_base_url}/chat/saveGptResult",
