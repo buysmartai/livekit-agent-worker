@@ -715,18 +715,18 @@ class VisionAgent(Agent):
         # ========== 4. 并行处理：保存视频记忆（不阻塞主流程）==========
         # 如果有 pingback 数据且有视频帧，启动后台任务保存记忆
         # 注意：传入快照数据，避免竞态条件
-        logger.info(f"🔔 检查是否启动视频记忆处理任务: has_video={video_frame_for_memory is not None}, has_pingback={pingback is not None}")
-        if pingback and video_frame_for_memory:
-            # 创建后台任务，传入快照数据（不等待完成）
-            asyncio.create_task(
-                self.process_video_memory_async(
-                    pingback=pingback.copy(),  # 传入 pingback 的拷贝
-                    user_context=user_context.copy(),  # 传入用户上下文的拷贝
-                    video_frame=video_frame_for_memory,  # 传入视频帧快照
-                    video_source=video_source_for_memory
-                )
-            )
-            logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
+        # logger.info(f"🔔 检查是否启动视频记忆处理任务: has_video={video_frame_for_memory is not None}, has_pingback={pingback is not None}")
+        # if pingback and video_frame_for_memory:
+        #     # 创建后台任务，传入快照数据（不等待完成）
+        #     asyncio.create_task(
+        #         self.process_video_memory_async(
+        #             pingback=pingback.copy(),  # 传入 pingback 的拷贝
+        #             user_context=user_context.copy(),  # 传入用户上下文的拷贝
+        #             video_frame=video_frame_for_memory,  # 传入视频帧快照
+        #             video_source=video_source_for_memory
+        #         )
+        #     )
+        #     logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
 
         # ========== 5. 调用默认的 LLM 处理 ==========
         logger.info("🤖 调用默认 LLM 处理...")
