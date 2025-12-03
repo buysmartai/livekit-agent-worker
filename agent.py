@@ -496,16 +496,18 @@ class VisionAgent(Agent):
             gpt_result: str,
             pingback: dict,
             user_context: Optional[dict] = None,
-            screen_frame_text: Optional[str] = None
+            screen_frame_text: Optional[str] = None,
+            camera_frame_text: Optional[str] = None
     ) -> bool:
         """
         调用后端 REST API 保存 GPT 生成的结果（并行处理，不阻塞主流程）
 
         Args:
-            gpt_result: LLM 生成的文本（这里是 Gemini 分析的结果）
+            gpt_result: LLM 生成的文本（Agent 对用户的回复）
             pingback: getChatPrompt 返回的 pingback 数据
             user_context: 用户上下文（包含 userId, avatarId, sessionId, timezone）
-            screen_frame_text: 屏幕分享的文本内容
+            screen_frame_text: 屏幕分享帧的分析内容
+            camera_frame_text: 摄像头帧的分析内容
 
         Returns:
             是否保存成功
@@ -545,6 +547,7 @@ class VisionAgent(Agent):
                 "gptResult": gpt_result,
                 "networkResult": None,
                 "screenFrameText": screen_frame_text,
+                "cameraFrameText": camera_frame_text,
                 "imgPay": "N",
                 "isVipImg": "N",
                 "pingback": pingback
@@ -554,6 +557,8 @@ class VisionAgent(Agent):
             logger.info(f"   GPT Result (前50字): {gpt_result[:50]}...")
             if screen_frame_text:
                 logger.info(f"   Screen Text (前50字): {screen_frame_text[:50]}...")
+            if camera_frame_text:
+                logger.info(f"   Camera Text (前50字): {camera_frame_text[:50]}...")
 
             response = await self._http_client.post(
                 f"{api_base_url}/chat/saveGptResult",
@@ -918,27 +923,61 @@ async def entrypoint(ctx: JobContext):
             user_context = agent.get_user_context()
             logger.info(f"👤 使用用户上下文: user_id={user_context['user_id']}, avatar_id={user_context['avatar_id']}")
             
-            # 获取屏幕分析内容（如果有屏幕分享帧）
-            screen_frame_text = None
+            # 获取视频帧
             screen_frame = agent._video_frames.get("screen_share")
+            camera_frame = agent._video_frames.get("camera")
+            
+            # 并行分析两个视频帧（如果存在）
+            screen_frame_text = None
+            camera_frame_text = None
+            
+            # 构建并行任务列表
+            analysis_tasks = []
+            task_names = []
+            
             if screen_frame:
-                logger.info("🖥️  检测到屏幕分享帧，开始分析...")
-                screen_frame_text = await agent.analyze_screen(screen_frame)
-                if screen_frame_text:
-                    logger.info(f"✅ 屏幕分析完成 (前100字): {screen_frame_text[:100]}...")
-                else:
-                    logger.warning("⚠️  屏幕分析失败或返回空")
+                logger.info("🖥️  检测到屏幕分享帧，准备分析...")
+                analysis_tasks.append(agent.analyze_screen(screen_frame))
+                task_names.append("screen_share")
             else:
-                logger.info("📷 没有屏幕分享帧，screen_frame_text 为空")
+                logger.info("📷 没有屏幕分享帧")
+            
+            if camera_frame:
+                logger.info("📹 检测到摄像头帧，准备分析...")
+                analysis_tasks.append(agent.analyze_screen(camera_frame))
+                task_names.append("camera")
+            else:
+                logger.info("📷 没有摄像头帧")
+            
+            # 并行执行分析任务
+            if analysis_tasks:
+                logger.info(f"🔄 开始并行分析 {len(analysis_tasks)} 个视频帧...")
+                results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+                
+                for i, result in enumerate(results):
+                    task_name = task_names[i]
+                    if isinstance(result, Exception):
+                        logger.error(f"❌ {task_name} 分析失败: {result}")
+                    elif result:
+                        if task_name == "screen_share":
+                            screen_frame_text = result
+                            logger.info(f"✅ 屏幕分析完成 (前100字): {screen_frame_text[:100]}...")
+                        elif task_name == "camera":
+                            camera_frame_text = result
+                            logger.info(f"✅ 摄像头分析完成 (前100字): {camera_frame_text[:100]}...")
+                    else:
+                        logger.warning(f"⚠️  {task_name} 分析返回空")
             
             # 调用 saveGptResult API 保存完整响应
             # gpt_result: Agent LLM（Gemini）对用户的回复
             # screen_frame_text: 屏幕分析的结果
+            # camera_frame_text: 摄像头分析的结果
             success = await agent.save_gpt_result(
                 gpt_result=full_response,
                 pingback=agent._last_pingback,
                 user_context=user_context,
-                screen_frame_text=screen_frame_text
+                screen_frame_text=screen_frame_text,
+                camera_frame_text=camera_frame_text
             )
             
             if success:
