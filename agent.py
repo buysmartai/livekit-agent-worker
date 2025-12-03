@@ -38,7 +38,7 @@ from livekit.agents import (
 )
 from livekit.agents.voice import Agent, AgentSession, VoiceActivityVideoSampler, ModelSettings
 from livekit.agents.utils import images
-from livekit.plugins import aliyun
+from livekit.plugins import aliyun, google
 
 # 尝试导入 update_instructions 函数（用于直接修改 chat_ctx）
 try:
@@ -764,10 +764,10 @@ async def entrypoint(ctx: JobContext):
             # 注意：当前版本的 aliyun.TTS 不支持 pitch_rate 和 volume 参数
         ),
 
-        # 大语言模型 (LLM) - 使用支持视觉的 Qwen-VL 模型
-        llm=aliyun.LLM(
-            model="qwen-vl-max",  # Qwen-VL-Max 支持图像输入
-            # 其他可选模型：qwen-vl-plus (更快但精度稍低)
+        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型
+        llm=google.LLM(
+            model="gemini-2.5-flash",  # Gemini 2.0 Flash 支持图像/视频输入
+            # 其他可选模型：gemini-1.5-pro, gemini-1.5-flash
         ),
 
         # 视频采样器 - 根据用户说话状态自动调整采样频率
