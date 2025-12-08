@@ -10,6 +10,9 @@ livekit-plugins-aliyun>=1.2.9
 # Google Gemini 插件 - 用于 LLM
 livekit-plugins-google>=1.2.9
 
+# OpenAI 插件 - 用于 STT
+livekit-plugins-openai>=1.2.9
+
 # 阿里云插件依赖
 httpx
 openai
