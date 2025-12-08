@@ -26,7 +26,11 @@ Thumbs.db
 
 # Documentation
 README.md
-*.md
+# *.md  # 注释掉，避免忽略插件目录中的文件
+
+# 排除插件的构建产物，但保留源码
+livekit-plugins-minimax-tts/build/
+livekit-plugins-minimax-tts/*.egg-info/
 
 # Development
 docker-compose.dev.yml

@@ -14,6 +14,10 @@ COPY requirements.txt .
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 复制并安装本地 MiniMax TTS 插件
+COPY livekit-plugins-minimax-tts/ ./livekit-plugins-minimax-tts/
+RUN pip install --no-cache-dir ./livekit-plugins-minimax-tts/
+
 # 开发模式：代码通过 volume 挂载，不复制到镜像中
 
 # 暴露调试端口（如果需要）
