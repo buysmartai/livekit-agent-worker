@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "livekit-plugins-minimax-stt"
+name = "livekit-plugins-minimax-tts"
 version = "0.1.0"
-description = "MiniMax STT (Speech-to-Text) plugin for LiveKit Agents"
+description = "MiniMax TTS (Text-to-Speech) plugin for LiveKit Agents"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"
@@ -17,10 +17,10 @@ keywords = [
     "realtime",
     "audio",
     "livekit",
-    "stt",
-    "speech-to-text",
+    "tts",
+    "text-to-speech",
     "minimax",
-    "asr",
+    "speech-synthesis",
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -55,4 +55,4 @@ include = ["livekit*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"livekit.plugins.minimax_stt" = ["py.typed"]
+"livekit.plugins.minimax_tts" = ["py.typed"]

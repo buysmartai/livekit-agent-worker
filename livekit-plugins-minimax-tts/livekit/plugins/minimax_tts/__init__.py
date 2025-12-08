@@ -12,32 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MiniMax STT plugin for LiveKit Agents
+"""MiniMax TTS plugin for LiveKit Agents
 
-This plugin provides speech-to-text (STT) capabilities using MiniMax's
-streaming ASR (Automatic Speech Recognition) API.
+This plugin provides text-to-speech (TTS) capabilities using MiniMax's
+T2A (Text-to-Audio) API.
 
 Environment variables:
 - `MINIMAX_API_KEY`: Your MiniMax API key (required)
-- `MINIMAX_GROUP_ID`: Your MiniMax Group ID (optional, for some API versions)
 """
 
-from .stt import STT, SpeechStream
+from .tts import TTS, ChunkedStream
 from .version import __version__
 
-__all__ = ["STT", "SpeechStream", "__version__"]
+__all__ = ["TTS", "ChunkedStream", "__version__"]
 
 from livekit.agents import Plugin
 
 from .log import logger
 
 
-class MiniMaxSTTPlugin(Plugin):
+class MiniMaxTTSPlugin(Plugin):
     def __init__(self) -> None:
         super().__init__(__name__, __version__, __package__, logger)
 
 
-Plugin.register_plugin(MiniMaxSTTPlugin())
+Plugin.register_plugin(MiniMaxTTSPlugin())
 
 # Hide internal modules from documentation
 _module = dir()

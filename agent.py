@@ -21,8 +21,7 @@ import os
 from typing import Optional, AsyncIterable, Any
 import json
 from datetime import datetime
-from livekit.plugins import elevenlabs
-from livekit.plugins.elevenlabs import VoiceSettings
+from livekit.plugins.minimax_tts import TTS as MiniMaxTTS
 
 # HTTP 客户端 - 用于调用 REST API
 try:
@@ -832,7 +831,7 @@ async def entrypoint(ctx: JobContext):
     # 创建支持视觉分析的 Agent 实例
     # instructions 参数定义了助手的行为和角色
     agent = VisionAgent(
-        instructions=()
+        instructions=""  # 动态从 API 获取，初始为空
     )
     
     # ========== 从房间名称解析用户信息 ==========
@@ -849,23 +848,24 @@ async def entrypoint(ctx: JobContext):
             # vocabulary_id="your_vocabulary_id",  # 可选：热词表 ID，提高特定词汇识别准确率
         ),
 
-        # 语音合成 (TTS) - 使用阿里云 CosyVoice 语音合成
-        # tts=aliyun.TTS(
-        #     model="cosyvoice-v2",  # CosyVoice v2 模型
-        #     voice="Longwan_v2",  # 语音类型：龙城
-        #     speech_rate=1,  # 语速：1.0 为正常速度 (0.5-2.0)
-        #     # 注意：当前版本的 aliyun.TTS 不支持 pitch_rate 和 volume 参数
-        # ),
-        tts=elevenlabs.TTS(
-            voice_id="tQ4MEZFJOzsahSEEZtHK",
-            model="eleven_turbo_v2_5",
-            voice_settings=VoiceSettings(
-                stability=0.5,              # 稳定性 (0.0-1.0)
-                similarity_boost=0.75,      # 相似度 (0.0-1.0)
-                speed=1.2,                  # 语速 (0.8-1.2) - 设置为最快
-                use_speaker_boost=True      # 使用说话人增强
-            ),
+        # 语音合成 (TTS) - 使用 MiniMax T2A 语音合成
+        tts=MiniMaxTTS(
+            model="speech-02-turbo",  # 快速模型，可选：speech-2.6-hd, speech-2.6-turbo
+            voice_id="male-qn-qingse",  # MiniMax 预置音色
+            speed=1.0,  # 语速 (0.5-2.0)
+            # api_key="your_api_key",  # 或设置环境变量 MINIMAX_API_KEY
         ),
+        # ========== 原 ElevenLabs TTS 配置（已注释） ==========
+        # tts=elevenlabs.TTS(
+        #     voice_id="tQ4MEZFJOzsahSEEZtHK",
+        #     model="eleven_turbo_v2_5",
+        #     voice_settings=VoiceSettings(
+        #         stability=0.5,
+        #         similarity_boost=0.75,
+        #         speed=1.2,
+        #         use_speaker_boost=True
+        #     ),
+        # ),
 
         # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型
         llm=google.LLM(
