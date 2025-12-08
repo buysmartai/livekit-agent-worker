@@ -40,7 +40,7 @@ from livekit.agents import (
 )
 from livekit.agents.voice import Agent, AgentSession, VoiceActivityVideoSampler, ModelSettings
 from livekit.agents.utils import images
-from livekit.plugins import aliyun, google
+from livekit.plugins import aliyun, google, openai
 
 # 尝试导入 update_instructions 函数（用于直接修改 chat_ctx）
 try:
@@ -842,11 +842,17 @@ async def entrypoint(ctx: JobContext):
 
     # 创建 Agent 会话，配置语音和语言模型组件
     session = AgentSession(
-        # 语音识别 (STT) - 使用阿里云 Paraformer 实时语音识别
-        stt=aliyun.STT(
-            model="paraformer-realtime-v2",  # 实时语音识别模型
-            # vocabulary_id="your_vocabulary_id",  # 可选：热词表 ID，提高特定词汇识别准确率
+        # 语音识别 (STT) - 使用 OpenAI STT
+        stt=openai.STT(
+            model="gpt-4o-mini-transcribe",  # OpenAI 默认推荐模型
+            # language="zh",  # 中文语音识别
+            use_realtime=True
         ),
+        # ========== 原阿里云 STT 配置（已注释） ==========
+        # stt=aliyun.STT(
+        #     model="paraformer-realtime-v2",  # 实时语音识别模型
+        #     # vocabulary_id="your_vocabulary_id",  # 可选：热词表 ID，提高特定词汇识别准确率
+        # ),
 
         # 语音合成 (TTS) - 使用 MiniMax T2A 语音合成
         tts=MiniMaxTTS(
