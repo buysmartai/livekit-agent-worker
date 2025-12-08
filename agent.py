@@ -1002,7 +1002,7 @@ async def entrypoint(ctx: JobContext):
 
         # 语音合成 (TTS) - 使用 MiniMax T2A 语音合成
         tts=MiniMaxTTS(
-            model="speech-02-turbo",  # 快速模型，可选：speech-2.6-hd, speech-2.6-turbo
+            model="speech-2.6-turbo",  # 快速模型，可选：speech-2.6-hd, speech-2.6-turbo
             voice_id="male-qn-qingse",  # MiniMax 预置音色 male-qn-qingse
             speed=1.0,  # 语速 (0.5-2.0)
             # api_key="your_api_key",  # 或设置环境变量 MINIMAX_API_KEY
