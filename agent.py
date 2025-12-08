@@ -124,34 +124,37 @@ class VisionAgent(Agent):
 
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._active_video_sources}")
 
-    def _log_latency_metrics(self, stage: str = "complete") -> None:
+    def _log_latency_metrics(self, stage: str = "complete", metrics_snapshot: dict = None) -> None:
         """
         输出格式化的延迟统计日志
         
         Args:
             stage: 统计阶段，可选 "llm_first_token", "llm_complete", "tts_started", "complete"
+            metrics_snapshot: 可选的 metrics 快照（用于 TTS 事件，避免被新轮次覆盖）
         """
-        if self._llm_node_start_time == 0:
-            return
+        # 使用传入的快照或当前 metrics
+        metrics = metrics_snapshot if metrics_snapshot else self._latency_metrics
         
-        current_time = time.perf_counter()
-        metrics = self._latency_metrics
+        # 获取该轮次的开始时间（从 metrics 中获取，而不是实例变量）
+        start_time = metrics.get("llm_node_start_time", 0)
+        if start_time == 0:
+            return
         
         # 计算各阶段延迟
         api_latency = metrics.get("api_latency_ms", 0)
         
         llm_ttft = 0.0
         if metrics.get("llm_first_token_time"):
-            llm_ttft = (metrics["llm_first_token_time"] - self._llm_node_start_time) * 1000
+            llm_ttft = (metrics["llm_first_token_time"] - start_time) * 1000
         
         llm_complete = 0.0
         if metrics.get("llm_complete_time"):
-            llm_complete = (metrics["llm_complete_time"] - self._llm_node_start_time) * 1000
+            llm_complete = (metrics["llm_complete_time"] - start_time) * 1000
         
         tts_start = 0.0
         total_latency = 0.0
         if metrics.get("tts_start_time"):
-            tts_start = (metrics["tts_start_time"] - self._llm_node_start_time) * 1000
+            tts_start = (metrics["tts_start_time"] - start_time) * 1000
             total_latency = tts_start
         elif llm_complete > 0:
             total_latency = llm_complete
@@ -204,10 +207,17 @@ class VisionAgent(Agent):
 
     def record_tts_started(self) -> None:
         """记录 TTS 开始播放时间（由外部事件调用）"""
-        self._tts_start_time = time.perf_counter()
-        self._latency_metrics["tts_start_time"] = self._tts_start_time
-        # TTS 开始时输出完整统计
-        self._log_latency_metrics("tts_started")
+        tts_time = time.perf_counter()
+        
+        # 更新当前 metrics（如果还是同一轮次）
+        self._tts_start_time = tts_time
+        self._latency_metrics["tts_start_time"] = tts_time
+        
+        # 创建 metrics 快照用于日志输出（避免被新轮次覆盖）
+        metrics_snapshot = self._latency_metrics.copy()
+        
+        # TTS 开始时输出完整统计（使用快照）
+        self._log_latency_metrics("tts_started", metrics_snapshot)
 
     def set_user_info_from_room_name(self, room_name: str) -> bool:
         """
