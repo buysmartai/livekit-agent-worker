@@ -116,7 +116,7 @@ class TTS(tts.TTS):
         """Initialize the MiniMax TTS instance."""
         super().__init__(
             capabilities=TTSCapabilities(
-                streaming=True,  # We support streaming via HTTP chunked response
+                streaming=False,  # Use synthesize() mode, framework will auto-wrap with StreamAdapter
             ),
             sample_rate=sample_rate,
             num_channels=1,
@@ -221,10 +221,24 @@ class ChunkedStream(tts.ChunkedStream):
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._opts = opts
         self._session = session
+        self._output_emitter: tts.AudioEmitter | None = None
 
-    async def _run(self) -> None:
-        """Execute the TTS synthesis and emit audio frames."""
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        """Execute the TTS synthesis and emit audio frames.
+        
+        Args:
+            output_emitter: The audio emitter to push audio frames to.
+        """
+        self._output_emitter = output_emitter
         request_id = utils.shortuuid()
+        
+        # Initialize the output emitter
+        output_emitter.initialize(
+            request_id=request_id,
+            sample_rate=self._opts.sample_rate,
+            num_channels=1,
+            mime_type=f"audio/{self._opts.audio_format}",
+        )
         
         # Build request body according to MiniMax API spec
         request_body = {
@@ -311,6 +325,9 @@ class ChunkedStream(tts.ChunkedStream):
             logger.error(f"[{request_id}] TTS unexpected error: {e}", exc_info=True)
             raise
 
+        # Flush the output emitter to signal completion
+        output_emitter.flush()
+        
         logger.debug(f"[{request_id}] TTS synthesis completed")
 
     async def _process_sse_response(
@@ -400,22 +417,9 @@ class ChunkedStream(tts.ChunkedStream):
 
     async def _emit_audio(self, audio_bytes: bytes, request_id: str) -> None:
         """Emit audio bytes as frames."""
-        if not audio_bytes:
+        if not audio_bytes or not self._output_emitter:
             return
 
-        # For MP3 format, we need to decode or pass through
-        # LiveKit agents framework handles audio format conversion
-        
-        # Create audio frame from raw bytes
-        # The framework expects raw PCM or will handle codec conversion
-        frame = tts.SynthesizedAudio(
-            request_id=request_id,
-            frame=utils.audio.AudioFrame(
-                data=audio_bytes,
-                sample_rate=self._opts.sample_rate,
-                num_channels=1,
-                samples_per_channel=len(audio_bytes) // 2,  # Assuming 16-bit audio
-            ),
-        )
-        
-        self._event_ch.send_nowait(frame)
+        # Push audio bytes to the output emitter
+        # The framework handles audio format conversion (MP3 -> PCM)
+        self._output_emitter.push(audio_bytes)
