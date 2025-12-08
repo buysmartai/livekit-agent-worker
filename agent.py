@@ -826,6 +826,19 @@ class VisionAgent(Agent):
                                 await self.update_instructions(system_text)
                                 logger.info("✅ System prompt 已动态更新（当前轮次 + 后续轮次）")
 
+                # ========== 添加预填充 Assistant 消息，跳过 Gemini 3 思考链 ==========
+                # Gemini 3 Pro 无法完全禁用思考功能，通过预填充 assistant 消息
+                # 告诉模型"思考已完成"，绕过内置思考链，减少延迟
+                thinking_done_msg = llm.ChatMessage(
+                    role="assistant",
+                    content=["""<think>  
+    内部隐性推理链已完成。所有必要判断、路径选择与上下文分析均已结束。  
+    本阶段标记为"结束"，不再继续展开。  
+</think>"""]
+                )
+                chat_ctx.items.append(thinking_done_msg)
+                logger.info("🧠 已添加预填充 Assistant 消息（跳过思考链）")
+
                 # 可选：记录其他配置信息
                 max_tokens = data.get("maxOutputTokens", "N/A")
                 temperature = data.get("temperature", "N/A")
