@@ -990,7 +990,7 @@ async def entrypoint(ctx: JobContext):
         # 语音合成 (TTS) - 使用 MiniMax T2A 语音合成
         tts=MiniMaxTTS(
             model="speech-02-turbo",  # 快速模型，可选：speech-2.6-hd, speech-2.6-turbo
-            voice_id="male-qn-qingse",  # MiniMax 预置音色
+            voice_id="male-qn-qingse",  # MiniMax 预置音色 male-qn-qingse
             speed=1.0,  # 语速 (0.5-2.0)
             # api_key="your_api_key",  # 或设置环境变量 MINIMAX_API_KEY
         ),
@@ -1006,16 +1006,26 @@ async def entrypoint(ctx: JobContext):
         #     ),
         # ),
 
-        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型 (Vertex AI)
+        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型
         # 参考: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-pro?hl=zh-cn
-        llm=google.LLM(
-            model="gemini-2.5-flash",  # Gemini 3 Pro 预览版
-            # vertexai=True,  # 启用 Vertex AI
-            # project="buysmart-gemini-1",  # GCP 项目 ID
-            # location="us-central1",  # 区域
-            # Gemini 3 使用 thinking_level 替代 thinking_budget
-            # thinking_config={"thinking_level": 0 },
-             thinking_config={"thinking_budget": 0},  # 禁用思考模式
+        # 原生 Google LLM（已注释）:
+        # llm=google.LLM(
+        #     model="gemini-2.5-flash",  # Gemini 3 Pro 预览版
+        #     # vertexai=True,  # 启用 Vertex AI
+        #     # project="buysmart-gemini-1",  # GCP 项目 ID
+        #     # location="us-central1",  # 区域
+        #     # Gemini 3 使用 thinking_level 替代 thinking_budget
+        #     # thinking_config={"thinking_level": 0 },
+        #      thinking_config={"thinking_budget": 0},  # 禁用思考模式
+        # ),
+        # 使用 OpenAI 兼容模式调用 Gemini（更灵活，便于切换模型）
+        llm=openai.LLM(
+            model="gemini-3-pro-preview",
+            # model="gemini-2.5-flash",  # grok-4-fast-non-reasoning：禁用思考模式的多模态模型
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            # reasoning_effort="low",  # 禁用思考模式
+            # timeout=30.0
         ),
 
         # 视频采样器 - 根据用户说话状态自动调整采样频率
