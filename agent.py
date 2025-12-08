@@ -873,7 +873,7 @@ async def entrypoint(ctx: JobContext):
         #     ),
         # ),
 
-        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型
+        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型  https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-pro?hl=zh-cn
         llm=google.LLM(
             model="gemini-2.5-flash",  # Gemini 2.0 Flash 支持图像/视频输入
             # 其他可选模型：gemini-1.5-pro, gemini-1.5-flash
