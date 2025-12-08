@@ -59,3 +59,9 @@ logs/
 # 临时文件
 *.tmp
 *.temp
+
+# Google Cloud / 敏感凭证文件
+*-auth.json
+*credentials*.json
+service-account*.json
+buysmart-gemini-auth.json

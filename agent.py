@@ -16,6 +16,7 @@ LiveKit Agent Worker - 阿里云语音助手服务
 import asyncio
 import io
 import logging
+import time
 from dotenv import load_dotenv
 import os
 from typing import Optional, AsyncIterable, Any
@@ -112,7 +113,101 @@ class VisionAgent(Agent):
             )
             logger.info("✅ HTTP 客户端已初始化")
 
+        # ========== 延迟统计相关变量 ==========
+        self._latency_metrics: dict = {}  # 存储当前轮次的延迟数据
+        self._llm_node_start_time: float = 0.0  # llm_node 开始时间
+        self._api_latency_ms: float = 0.0  # getChatPrompt API 延迟
+        self._llm_first_token_time: float = 0.0  # LLM 首 token 时间
+        self._llm_complete_time: float = 0.0  # LLM 完成时间
+        self._tts_start_time: float = 0.0  # TTS 开始播放时间
+        self._current_turn_id: int = 0  # 当前对话轮次 ID
+
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._active_video_sources}")
+
+    def _log_latency_metrics(self, stage: str = "complete") -> None:
+        """
+        输出格式化的延迟统计日志
+        
+        Args:
+            stage: 统计阶段，可选 "llm_first_token", "llm_complete", "tts_started", "complete"
+        """
+        if self._llm_node_start_time == 0:
+            return
+        
+        current_time = time.perf_counter()
+        metrics = self._latency_metrics
+        
+        # 计算各阶段延迟
+        api_latency = metrics.get("api_latency_ms", 0)
+        
+        llm_ttft = 0.0
+        if metrics.get("llm_first_token_time"):
+            llm_ttft = (metrics["llm_first_token_time"] - self._llm_node_start_time) * 1000
+        
+        llm_complete = 0.0
+        if metrics.get("llm_complete_time"):
+            llm_complete = (metrics["llm_complete_time"] - self._llm_node_start_time) * 1000
+        
+        tts_start = 0.0
+        total_latency = 0.0
+        if metrics.get("tts_start_time"):
+            tts_start = (metrics["tts_start_time"] - self._llm_node_start_time) * 1000
+            total_latency = tts_start
+        elif llm_complete > 0:
+            total_latency = llm_complete
+        elif llm_ttft > 0:
+            total_latency = llm_ttft
+        
+        # 计算 LLM 生成耗时（从首 token 到完成）
+        llm_generation = 0.0
+        if llm_complete > 0 and llm_ttft > 0:
+            llm_generation = llm_complete - llm_ttft
+        
+        # 计算 TTS 启动延迟（从 LLM 完成到 TTS 开始）
+        tts_startup = 0.0
+        if tts_start > 0 and llm_complete > 0:
+            tts_startup = tts_start - llm_complete
+        
+        # 输出日志
+        turn_id = metrics.get("turn_id", self._current_turn_id)
+        user_text = metrics.get("user_text", "")[:30]
+        
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(f"⏱️  [延迟统计] Turn #{turn_id} | Stage: {stage}")
+        logger.info(f"📝 用户输入: {user_text}...")
+        logger.info("-" * 70)
+        logger.info(f"├─ 🌐 API (getChatPrompt):    {api_latency:>8.2f} ms")
+        logger.info(f"├─ 🚀 LLM TTFT (首token):     {llm_ttft:>8.2f} ms")
+        logger.info(f"├─ 📝 LLM 生成耗时:           {llm_generation:>8.2f} ms")
+        logger.info(f"├─ ✅ LLM 完成 (从开始):      {llm_complete:>8.2f} ms")
+        logger.info(f"├─ 🔊 TTS 启动延迟:           {tts_startup:>8.2f} ms")
+        logger.info(f"├─ 🎵 TTS 开始播放 (从开始):  {tts_start:>8.2f} ms")
+        logger.info("-" * 70)
+        logger.info(f"└─ 📊 总延迟 (用户输入→TTS):  {total_latency:>8.2f} ms")
+        logger.info("=" * 70)
+        logger.info("")
+
+    def _reset_latency_metrics(self) -> None:
+        """重置延迟统计数据（新轮次开始时调用）"""
+        self._current_turn_id += 1
+        self._llm_node_start_time = time.perf_counter()
+        self._latency_metrics = {
+            "turn_id": self._current_turn_id,
+            "llm_node_start_time": self._llm_node_start_time,
+            "api_latency_ms": 0.0,
+            "llm_first_token_time": 0.0,
+            "llm_complete_time": 0.0,
+            "tts_start_time": 0.0,
+            "user_text": "",
+        }
+
+    def record_tts_started(self) -> None:
+        """记录 TTS 开始播放时间（由外部事件调用）"""
+        self._tts_start_time = time.perf_counter()
+        self._latency_metrics["tts_start_time"] = self._tts_start_time
+        # TTS 开始时输出完整统计
+        self._log_latency_metrics("tts_started")
 
     def set_user_info_from_room_name(self, room_name: str) -> bool:
         """
@@ -341,6 +436,9 @@ class VisionAgent(Agent):
             
             elapsed_time = (time.perf_counter() - start_time) * 1000  # 转换为毫秒
             logger.info(f"⏱️  getChatPrompt API 耗时: {elapsed_time:.2f}ms")
+            
+            # 记录 API 延迟到统计数据
+            self._latency_metrics["api_latency_ms"] = elapsed_time
 
             if response.status_code == 200:
                 result = response.json()
@@ -616,6 +714,10 @@ class VisionAgent(Agent):
         logger.info("🔔 VisionAgent.llm_node 被调用！（拦截所有用户输入）")
         logger.info("=" * 80)
 
+        # ========== 0. 初始化延迟统计 ==========
+        self._reset_latency_metrics()
+        logger.info(f"⏱️  [延迟统计] Turn #{self._current_turn_id} 开始计时")
+
         # ========== 1. 查找最新的用户消息 ==========
         user_message: llm.ChatMessage | None = None
         for item in reversed(chat_ctx.items):
@@ -631,6 +733,9 @@ class VisionAgent(Agent):
 
         user_text = user_message.text_content or ""
         logger.info(f"📝 用户输入: {user_text}")
+        
+        # 记录用户输入文本（用于延迟统计日志）
+        self._latency_metrics["user_text"] = user_text
 
         # 从实例变量获取用户上下文（已从房间名称解析）
         user_context = self.get_user_context()
@@ -810,8 +915,26 @@ class VisionAgent(Agent):
         #     )
         #     logger.info("🚀 [并行] 已启动视频记忆处理任务（后台运行，不阻塞对话）")
 
+        # ========== 5. 调用 LLM 并记录延迟 ==========
+        is_first_token = True
         async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
+            # 记录首 token 时间 (TTFT - Time To First Token)
+            if is_first_token:
+                self._llm_first_token_time = time.perf_counter()
+                self._latency_metrics["llm_first_token_time"] = self._llm_first_token_time
+                ttft_ms = (self._llm_first_token_time - self._llm_node_start_time) * 1000
+                logger.info(f"⏱️  [延迟统计] LLM 首 Token (TTFT): {ttft_ms:.2f}ms")
+                is_first_token = False
             yield chunk
+        
+        # LLM 完成时记录时间
+        self._llm_complete_time = time.perf_counter()
+        self._latency_metrics["llm_complete_time"] = self._llm_complete_time
+        llm_total_ms = (self._llm_complete_time - self._llm_node_start_time) * 1000
+        logger.info(f"⏱️  [延迟统计] LLM 完成: {llm_total_ms:.2f}ms")
+        
+        # 输出 LLM 完成阶段的统计（TTS 还未开始）
+        self._log_latency_metrics("llm_complete")
 
 
 async def entrypoint(ctx: JobContext):
@@ -873,11 +996,16 @@ async def entrypoint(ctx: JobContext):
         #     ),
         # ),
 
-        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型  https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-pro?hl=zh-cn
+        # 大语言模型 (LLM) - 使用 Google Gemini 多模态模型 (Vertex AI)
+        # 参考: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-pro?hl=zh-cn
         llm=google.LLM(
-            model="gemini-2.5-flash",  # Gemini 2.0 Flash 支持图像/视频输入
-            # 其他可选模型：gemini-1.5-pro, gemini-1.5-flash
-            thinking_config={"thinking_budget": 0},  # 禁用思考模式
+            model="gemini-2.5-flash",  # Gemini 3 Pro 预览版
+            # vertexai=True,  # 启用 Vertex AI
+            # project="buysmart-gemini-1",  # GCP 项目 ID
+            # location="us-central1",  # 区域
+            # Gemini 3 使用 thinking_level 替代 thinking_budget
+            # thinking_config={"thinking_level": 0 },
+             thinking_config={"thinking_budget": 0},  # 禁用思考模式
         ),
 
         # 视频采样器 - 根据用户说话状态自动调整采样频率
@@ -1002,6 +1130,17 @@ async def entrypoint(ctx: JobContext):
         LiveKit 事件系统要求使用同步回调，在内部使用 asyncio.create_task 来执行异步操作。
         """
         asyncio.create_task(_handle_conversation_item_added(event))
+
+    # ========== 注册 agent_speech_started 事件 - 记录 TTS 开始时间 ==========
+    @session.on("agent_speech_started")
+    def on_agent_speech_started(event):
+        """
+        当 Agent 开始说话（TTS 开始播放）时触发
+        
+        记录 TTS 开始播放时间，用于计算端到端延迟
+        """
+        logger.info("🎵 agent_speech_started 事件触发 - TTS 开始播放")
+        agent.record_tts_started()
 
     # 启动会话
     await session.start(agent=agent, room=ctx.room)
