@@ -116,7 +116,7 @@ class TTS(tts.TTS):
         """Initialize the MiniMax TTS instance."""
         super().__init__(
             capabilities=TTSCapabilities(
-                streaming=True,  # Enable streaming mode for lower latency
+                streaming=False,  # Use synthesize() mode, framework will auto-wrap with StreamAdapter
             ),
             sample_rate=sample_rate,
             num_channels=1,
