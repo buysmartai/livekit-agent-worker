@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir ./livekit-plugins-minimax-tts/
 
 # 复制应用代码
 COPY agent.py .
+COPY livekit_agent/ ./livekit_agent/
 
 # 创建非 root 用户
 RUN useradd -m -u 1000 livekit && chown -R livekit:livekit /app
