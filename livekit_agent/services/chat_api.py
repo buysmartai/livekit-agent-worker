@@ -73,6 +73,7 @@ class ChatAPIClient(BaseAPIClient):
         if result and result.get("code") == "0":
             logger.info(f"✅ 获取动态 prompt 成功 (耗时: {elapsed_ms:.2f}ms)")
             response = PromptResponse.from_api_response(result)
+            response.elapsed_ms = elapsed_ms  # 记录 API 耗时
             return response
         else:
             code = result.get("code") if result else "N/A"

@@ -66,6 +66,7 @@ class PromptResponse:
     max_output_tokens: Optional[int] = None
     temperature: Optional[float] = None
     raw_data: Dict[str, Any] = field(default_factory=dict)
+    elapsed_ms: float = 0.0  # API 调用耗时（毫秒）
     
     @classmethod
     def from_api_response(cls, result: dict) -> "PromptResponse":

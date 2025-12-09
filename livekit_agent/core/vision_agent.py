@@ -276,8 +276,8 @@ class VisionAgent(Agent):
             )
             
             if prompt_result:
-                # 记录 API 延迟
-                # (已在 chat_api 内部记录)
+                # 记录 API 延迟到 LatencyTracker
+                self._latency_tracker.record_api_latency(prompt_result.elapsed_ms)
                 
                 # 保存 pingback
                 self._last_pingback = prompt_result.pingback

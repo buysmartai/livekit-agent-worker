@@ -170,9 +170,18 @@ def _register_event_handlers(session, agent: VisionAgent) -> None:
     def on_conversation_item_added(event: ConversationItemAddedEvent):
         asyncio.create_task(_handle_conversation_item_added(event))
     
-    @session.on("agent_speech_started")
-    def on_agent_speech_started(event):
-        logger.info("🎵 agent_speech_started 事件触发 - TTS 开始播放")
-        agent.record_tts_started()
+    # 记录 TTS 是否已开始（避免重复记录）
+    tts_started_for_turn = {"turn_id": 0}
+    
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event):
+        """当 agent 状态变为 speaking 时，记录 TTS 开始时间"""
+        if event.new_state == "speaking":
+            current_turn = agent._latency_tracker.current_turn_id
+            # 避免同一轮次重复记录
+            if tts_started_for_turn["turn_id"] != current_turn:
+                tts_started_for_turn["turn_id"] = current_turn
+                logger.info("🎵 agent_state_changed -> speaking - TTS 开始播放")
+                agent.record_tts_started()
     
     logger.info("📡 已注册事件处理函数")
