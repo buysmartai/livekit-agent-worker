@@ -26,28 +26,43 @@ git clone https://github.com/SunYin/livekit-agent-worker.git
 cd livekit-agent-worker
 ```
 
-### 2. 创建虚拟环境
+### 2. 安装（推荐方式）
+
+使用安装脚本一键配置：
+
+```bash
+./scripts/setup.sh
+```
+
+这会自动：
+- 创建 Python 虚拟环境 (.venv)
+- 安装所有依赖
+- 正确配置本地 MiniMax TTS 插件
+
+### 2.1 手动安装（可选）
 
 ```bash
 # 创建虚拟环境
-python3 -m venv venv
+python3 -m venv .venv
 
 # 激活虚拟环境
 # macOS/Linux:
-source venv/bin/activate
+source .venv/bin/activate
 # Windows:
-# venv\Scripts\activate
-```
+# .venv\Scripts\activate
 
-### 3. 安装依赖
-
-```bash
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-**核心依赖说明**：
+> ⚠️ **注意**: 本地 MiniMax TTS 插件使用 Python 命名空间包。如果遇到 `ModuleNotFoundError: No module named 'livekit.plugins.minimax_tts'`，请删除以下文件后重新安装：
+> ```bash
+> rm -f livekit-plugins-minimax-tts/livekit/__init__.py
+> rm -f livekit-plugins-minimax-tts/livekit/plugins/__init__.py
+> pip install -e ./livekit-plugins-minimax-tts
+> ```
 
-`requirements.txt` 包含以下必需的包：
+### 3. 配置环境变量
 
 - **`livekit-agents[elevenlabs,images]>=1.2.9`** - LiveKit Agents 核心框架
   - `elevenlabs` 扩展：支持 ElevenLabs TTS

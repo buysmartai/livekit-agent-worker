@@ -1,8 +1,11 @@
 # LiveKit Agent 核心依赖
 # 注意：images 扩展提供 PIL/Pillow 支持，用于图像编码（视觉分析必需）
 livekit-agents[elevenlabs,images]>=1.2.9
-# minimax 插件
-livekit-plugins-minimax>=1.2.9
+
+# MiniMax TTS 自定义插件 (本地安装)
+# 使用 pip install -e ./livekit-plugins-minimax-tts 安装
+# 或运行 ./scripts/setup.sh
+-e ./livekit-plugins-minimax-tts
 
 # 阿里云插件
 livekit-plugins-aliyun>=1.2.9
