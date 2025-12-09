@@ -478,6 +478,91 @@ class VisionAgent(Agent):
             logger.error(f"❌ getChatPrompt API 调用异常 (耗时: {elapsed_time:.2f}ms): {e}", exc_info=True)
             return None
 
+    async def get_avatar_voice_info(self, avatar_id: str, user_id: str = "default_user") -> Optional[dict]:
+        """
+        调用后端 REST API 获取 Avatar 的语音配置信息
+
+        Args:
+            avatar_id: Avatar ID
+            user_id: 用户 ID
+
+        Returns:
+            包含 voiceInfo 的字典，如果失败返回 None
+            返回结构:
+            {
+                "voiceApiId": "string",      # MiniMax 声音 ID，用于 TTS
+                "audioUrl": "string",         # 声音预览音频 URL
+                "description": "string",      # 声音描述
+                "tags": "string",             # 标签
+                "elevenlabApiId": "string"    # ElevenLabs 声音 ID（可选）
+            }
+        """
+        import time
+        start_time = time.perf_counter()
+
+        if not self._http_client:
+            logger.error("❌ HTTP 客户端未初始化，无法调用 REST API")
+            return None
+
+        # 从环境变量获取 API 配置
+        api_base_url = os.getenv("CHAT_API_BASE_URL", "https://your-api.com")
+        api_key = os.getenv("CHAT_API_KEY", "")
+
+        try:
+            # 构建请求体
+            request_body = {
+                "userId": user_id,
+                "requestId": os.urandom(16).hex(),
+                "timezone": os.getenv("TIMEZONE", "Asia/Shanghai"),
+                "userLocalTime": datetime.now().isoformat(),
+                "avatarId": avatar_id,
+            }
+
+            logger.info(f"🌐 调用 queryUserAvatarById API: {api_base_url}/user/queryUserAvatarById")
+            logger.info(f"📋 请求参数: userId={user_id}, avatarId={avatar_id}")
+
+            response = await self._http_client.post(
+                f"{api_base_url}/user/queryUserAvatarById",
+                json=request_body,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
+
+            elapsed_time = (time.perf_counter() - start_time) * 1000  # 转换为毫秒
+            logger.info(f"⏱️  queryUserAvatarById API 耗时: {elapsed_time:.2f}ms")
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("code") == "0" or result.get("code") == 0:
+                    data = result.get("data", {})
+                    voice_info = data.get("voiceInfo", {})
+                    if voice_info:
+                        logger.info(f"✅ 获取 Avatar 语音信息成功:")
+                        logger.info(f"   🎤 voiceApiId: {voice_info.get('voiceApiId', 'N/A')}")
+                        logger.info(f"   🔊 description: {voice_info.get('description', 'N/A')}")
+                        return voice_info
+                    else:
+                        logger.warning(f"⚠️  Avatar {avatar_id} 没有配置 voiceInfo")
+                        return None
+                else:
+                    logger.warning(f"⚠️  API 返回错误码: {result.get('code')} (耗时: {elapsed_time:.2f}ms)")
+                    return None
+            else:
+                logger.error(f"❌ API 请求失败: HTTP {response.status_code} (耗时: {elapsed_time:.2f}ms)")
+                logger.error(f"响应内容: {response.text[:200]}")
+                return None
+
+        except httpx.TimeoutException:
+            elapsed_time = (time.perf_counter() - start_time) * 1000
+            logger.error(f"❌ queryUserAvatarById API 超时（耗时: {elapsed_time:.2f}ms，超过10秒）")
+            return None
+        except Exception as e:
+            elapsed_time = (time.perf_counter() - start_time) * 1000
+            logger.error(f"❌ queryUserAvatarById API 调用异常 (耗时: {elapsed_time:.2f}ms): {e}", exc_info=True)
+            return None
+
     async def analyze_screen(self, frame: rtc.VideoFrame, user_input: str = "") -> Optional[str]:
         """
         使用多模态大模型分析屏幕内容
@@ -986,6 +1071,23 @@ async def entrypoint(ctx: JobContext):
     if not parse_success:
         logger.warning(f"⚠️  房间名称 '{room_name}' 解析失败，将使用默认用户信息")
 
+    # ========== 动态获取 Avatar 语音配置 ==========
+    # 默认 voice_id（当 API 调用失败时使用）
+    default_voice_id = "moss_audio_23e7a6cf-0996-11f0-ab96-82dcc6ce9d69"
+    voice_id = default_voice_id
+    
+    if agent._avatar_id:
+        logger.info(f"🎤 正在获取 Avatar {agent._avatar_id} 的语音配置...")
+        voice_info = await agent.get_avatar_voice_info(agent._avatar_id, agent._user_id)
+        logger.info(f"📥 voice_info: {voice_info}")
+        if voice_info and voice_info.get("voiceApiId"):
+            voice_id = voice_info["voiceApiId"]
+            logger.info(f"✅ 使用动态 voice_id: {voice_id}")
+        else:
+            logger.warning(f"⚠️  无法获取 Avatar 语音配置，使用默认 voice_id: {default_voice_id}")
+    else:
+        logger.warning(f"⚠️  未解析到 avatar_id，使用默认 voice_id: {default_voice_id}")
+
     # 创建 Agent 会话，配置语音和语言模型组件
     session = AgentSession(
         # 语音识别 (STT) - 使用 OpenAI STT
@@ -1001,9 +1103,10 @@ async def entrypoint(ctx: JobContext):
         # ),
 
         # 语音合成 (TTS) - 使用 MiniMax T2A 语音合成
+        # voice_id 从后端 API 动态获取（基于 avatar_id）
         tts=MiniMaxTTS(
             model="speech-2.6-turbo",  # 快速模型，可选：speech-2.6-hd, speech-2.6-turbo
-            voice_id="moss_audio_23e7a6cf-0996-11f0-ab96-82dcc6ce9d69",  # MiniMax 预置音色 male-qn-qingse
+            voice_id=voice_id,  # 动态获取的 voice_id
             speed=1.0,  # 语速 (0.5-2.0)
             volume=1.0,
             pitch=0,
