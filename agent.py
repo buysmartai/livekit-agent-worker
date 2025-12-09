@@ -855,7 +855,7 @@ class VisionAgent(Agent):
             )
 
             if prompt_result:
-                logger.info(f"📥 prompt_result: {json.dumps(prompt_result, ensure_ascii=False)[:500]}...")
+                logger.info(f"📥 prompt_result: {json.dumps(prompt_result, ensure_ascii=False)}")
 
                 # 获取返回的数据
                 data = prompt_result.get("data", {})
