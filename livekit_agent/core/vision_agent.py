@@ -8,7 +8,9 @@ VisionAgent - 支持视觉分析的自定义 Agent
 - 延迟统计
 """
 
-from typing import Optional, AsyncIterable
+from __future__ import annotations
+
+from typing import Optional, AsyncIterable, Union, List
 import asyncio
 
 from livekit.agents.voice import Agent, ModelSettings
@@ -246,9 +248,9 @@ class VisionAgent(Agent):
     async def llm_node(
         self,
         chat_ctx: llm.ChatContext,
-        tools: list[llm.FunctionTool],
+        tools: List[llm.FunctionTool],
         model_settings: ModelSettings,
-    ) -> AsyncIterable[llm.ChatChunk | str]:
+    ) -> AsyncIterable[Union[llm.ChatChunk, str]]:
         """
         LLM 节点 - 拦截所有用户输入
         
