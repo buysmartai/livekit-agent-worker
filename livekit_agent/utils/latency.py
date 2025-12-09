@@ -43,9 +43,10 @@ class LatencyMetrics:
         return 0.0
     
     def get_tts_startup_ms(self) -> float:
-        """获取 TTS 启动延迟 (毫秒)，从 LLM 完成到 TTS 开始"""
-        if self.tts_start_time and self.llm_complete_time:
-            return (self.tts_start_time - self.llm_complete_time) * 1000
+        """获取 TTS 启动延迟 (毫秒)，从 LLM 首 token 到 TTS 开始"""
+        # 流式处理：TTS 在 LLM 首 token 后就可能开始，不需要等 LLM 完成
+        if self.tts_start_time and self.llm_first_token_time:
+            return (self.tts_start_time - self.llm_first_token_time) * 1000
         return 0.0
     
     def get_tts_start_ms(self) -> float:
@@ -194,10 +195,10 @@ class LatencyTracker:
         logger.info("-" * 70)
         logger.info(f"├─ 🌐 API (getChatPrompt):    {m.api_latency_ms:>8.2f} ms")
         logger.info(f"├─ 🚀 LLM TTFT (首token):     {m.get_llm_ttft_ms():>8.2f} ms")
+        logger.info(f"├─ 🔊 TTS 启动 (首token后):   {m.get_tts_startup_ms():>8.2f} ms")
+        logger.info(f"├─ 🎵 TTS 开始播放 (从开始):  {m.get_tts_start_ms():>8.2f} ms")
         logger.info(f"├─ 📝 LLM 生成耗时:           {m.get_llm_generation_ms():>8.2f} ms")
         logger.info(f"├─ ✅ LLM 完成 (从开始):      {m.get_llm_complete_ms():>8.2f} ms")
-        logger.info(f"├─ 🔊 TTS 启动延迟:           {m.get_tts_startup_ms():>8.2f} ms")
-        logger.info(f"├─ 🎵 TTS 开始播放 (从开始):  {m.get_tts_start_ms():>8.2f} ms")
         logger.info("-" * 70)
         logger.info(f"└─ 📊 总延迟 (用户输入→TTS):  {m.get_total_latency_ms():>8.2f} ms")
         logger.info("=" * 70)
