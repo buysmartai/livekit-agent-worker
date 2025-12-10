@@ -11,7 +11,6 @@ VisionAgent - 支持视觉分析的自定义 Agent
 from __future__ import annotations
 
 from typing import Optional, AsyncIterable, Union, List
-import asyncio
 
 from livekit.agents.voice import Agent, ModelSettings
 from livekit.agents import llm
@@ -23,14 +22,6 @@ from ..models import UserContext, PromptResponse, PingbackData
 from ..config import get_settings
 
 logger = get_logger("core.vision_agent")
-
-# 尝试导入 SDK 的 update_instructions 函数
-try:
-    from livekit.agents.voice.generation import update_instructions as sdk_update_instructions
-    HAS_SDK_UPDATE_INSTRUCTIONS = True
-except ImportError:
-    HAS_SDK_UPDATE_INSTRUCTIONS = False
-    logger.warning("⚠️  无法导入 sdk_update_instructions，将使用手动方式更新 chat_ctx")
 
 
 class VisionAgent(Agent):
@@ -199,6 +190,66 @@ class VisionAgent(Agent):
                 return item.text_content or ""
         return ""
     
+    def _rebuild_chat_ctx_from_api(self, chat_ctx: llm.ChatContext, prompt_result: PromptResponse) -> None:
+        """
+        使用 API 返回的完整 messages 重建 chat_ctx
+
+        API 返回的 data.messages 包含：
+        - system: 完整的 system prompt
+        - user: 包含 <user_invisible_guidance>、<creative_rules> 等指令的完整用户消息
+
+        Args:
+            chat_ctx: 当前的 ChatContext
+            prompt_result: API 返回的 PromptResponse
+        """
+        # 清空现有的 items
+        chat_ctx.items.clear()
+        logger.info("🔄 清空 chat_ctx，准备使用 API 返回的 messages 重建")
+
+        # 遍历 API 返回的 messages
+        for msg in prompt_result.messages:
+            if msg.role == "system":
+                # 添加 system message
+                system_msg = llm.ChatMessage(
+                    role="system",
+                    content=[msg.get_text()] if isinstance(msg.content, str) else [msg.get_text()],
+                )
+                chat_ctx.items.append(system_msg)
+                logger.info(f"✅ 添加 system message (前100字): {msg.get_text()[:100]}...")
+
+            elif msg.role == "user":
+                # 添加 user message（保留完整的 content 结构）
+                # API 返回的 content 可能是 list，包含 type: text 的对象
+                if isinstance(msg.content, list):
+                    # 提取所有文本内容
+                    text_parts = []
+                    for item in msg.content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                        elif isinstance(item, str):
+                            text_parts.append(item)
+                    content = "\n".join(text_parts) if text_parts else ""
+                else:
+                    content = msg.content
+
+                user_msg = llm.ChatMessage(
+                    role="user",
+                    content=[content],
+                )
+                chat_ctx.items.append(user_msg)
+                logger.info(f"✅ 添加 user message (前200字): {content[:200]}...")
+
+            elif msg.role == "assistant":
+                # 添加 assistant message（如果有历史）
+                assistant_msg = llm.ChatMessage(
+                    role="assistant",
+                    content=[msg.get_text()],
+                )
+                chat_ctx.items.append(assistant_msg)
+                logger.info(f"✅ 添加 assistant message")
+
+        logger.info(f"✅ chat_ctx 重建完成，共 {len(chat_ctx.items)} 条消息")
+
     def _add_video_frames_to_message(self, chat_ctx: llm.ChatContext) -> None:
         """将视频帧添加到用户消息"""
         # 查找用户消息
@@ -283,22 +334,13 @@ class VisionAgent(Agent):
                 self._last_pingback = prompt_result.pingback
                 logger.info(f"💾 保存 pingback 数据，promptId={prompt_result.pingback.prompt_id}")
                 
-                # 更新 system prompt
+                # 使用 API 返回的完整 messages 重建 chat_ctx
+                # 这样可以使用 API 返回的 user message（包含 <user_invisible_guidance> 等指令）
+                self._rebuild_chat_ctx_from_api(chat_ctx, prompt_result)
+
+                # 更新 Agent 内部状态的 instructions
                 system_prompt = prompt_result.get_system_prompt()
                 if system_prompt:
-                    logger.info(f"🎭 动态更新 system prompt (前100字): {system_prompt[:100]}...")
-                    
-                    if HAS_SDK_UPDATE_INSTRUCTIONS:
-                        try:
-                            sdk_update_instructions(chat_ctx, instructions=system_prompt, add_if_missing=True)
-                            logger.info("✅ 已通过 SDK 函数更新 chat_ctx")
-                        except Exception as e:
-                            logger.warning(f"⚠️  SDK update_instructions 失败: {e}")
-                            self._manual_update_chat_ctx_system(chat_ctx, system_prompt)
-                    else:
-                        self._manual_update_chat_ctx_system(chat_ctx, system_prompt)
-                    
-                    # 更新 Agent 内部状态
                     await self.update_instructions(system_prompt)
                 
                 # 添加预填充消息（跳过思考链）

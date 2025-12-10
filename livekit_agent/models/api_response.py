@@ -102,6 +102,25 @@ class PromptResponse:
                 return msg.get_text()
         return None
 
+    def get_user_message(self) -> Optional[MessageContent]:
+        """获取 user message（包含完整指令）"""
+        for msg in self.messages:
+            if msg.role == "user":
+                return msg
+        return None
+
+    def get_user_content(self) -> Any:
+        """
+        获取 user message 的原始 content
+
+        Returns:
+            content 可以是 str 或 list（包含 text/image 等）
+        """
+        user_msg = self.get_user_message()
+        if user_msg:
+            return user_msg.content
+        return None
+
 
 @dataclass
 class VoiceInfo:

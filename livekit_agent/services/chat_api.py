@@ -69,6 +69,8 @@ class ChatAPIClient(BaseAPIClient):
         
         result, elapsed_ms = await self._request("POST", "chat/getChatPrompt", request_body)
         logger.info(f"⏱️  getChatPrompt API 耗时: {elapsed_ms:.2f}ms")
+        # 将result打印
+        logger.debug(f"🔍 getChatPrompt API 返回: {result}")
         
         if result and result.get("code") == "0":
             logger.info(f"✅ 获取动态 prompt 成功 (耗时: {elapsed_ms:.2f}ms)")
