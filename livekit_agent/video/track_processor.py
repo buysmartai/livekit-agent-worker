@@ -99,7 +99,7 @@ def setup_track_subscription(
             source_type = get_source_type_from_publication(publication)
             
             logger.info(
-                f"订阅到视频轨道: participant={participant.identity}, "
+                f"📹 订阅到视频轨道: participant={participant.identity}, "
                 f"source={publication.source}, type={source_type}"
             )
             
@@ -107,6 +107,25 @@ def setup_track_subscription(
             asyncio.create_task(
                 process_video_track(track, frame_manager, source_type)
             )
+    
+    @room.on("track_unsubscribed")
+    def on_track_unsubscribed(
+        track: rtc.Track,
+        publication: rtc.TrackPublication,
+        participant: rtc.RemoteParticipant,
+    ):
+        """当轨道取消订阅时，清除对应的视频帧缓存"""
+        if track.kind == rtc.TrackKind.KIND_VIDEO:
+            source_type = get_source_type_from_publication(publication)
+            
+            logger.info(
+                f"🚫 视频轨道已取消订阅: participant={participant.identity}, "
+                f"source={publication.source}, type={source_type}"
+            )
+            
+            # 清除对应的视频帧
+            frame_manager.clear_frame(source_type)
+            logger.info(f"🗑️  已清除 {source_type} 视频帧缓存")
     
     logger.info("✅ 视频轨道订阅已设置")
 
