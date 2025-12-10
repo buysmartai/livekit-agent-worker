@@ -1,21 +1,28 @@
-# LiveKit Agent Worker - 阿里云语音助手
+# LiveKit Agent Worker - 多模态智能语音助手
 
-基于 LiveKit Agents 框架和阿里云 AI 服务构建的智能语音助手服务。
+基于 LiveKit Agents 框架构建的智能语音助手服务，支持多种 AI 提供商。
 
 ## ✨ 功能特性
 
-- 🎤 **实时语音识别 (STT)**: 使用阿里云 Paraformer 实时语音识别模型
-- 🗣️ **自然语音合成 (TTS)**: 使用阿里云 CosyVoice 高质量语音合成
-- 🤖 **智能对话 (LLM)**: 集成阿里云 Qwen 大语言模型
+- 🎤 **实时语音识别 (STT)**: 支持 OpenAI Whisper、阿里云 Paraformer 等
+- 🗣️ **自然语音合成 (TTS)**: 支持 MiniMax、ElevenLabs、阿里云等
+- 🤖 **智能对话 (LLM)**: 支持 Google Gemini、OpenAI、阿里云 Qwen 等
 - 👁️ **视觉分析 (Vision)**: 支持多模态视觉理解，可同时分析摄像头和屏幕分享画面
+- 🎯 **动态 Prompt**: 通过 API 动态获取和更新对话 prompt
+- 📊 **延迟统计**: 内置 API/LLM/TTS 延迟追踪
+- 🔇 **噪音过滤**: 使用 Silero VAD 过滤背景噪音
 - 🚀 **低延迟**: 基于 LiveKit 实时通信框架
-- 🔧 **易于配置**: 简单的环境变量配置
+- 🔧 **模块化设计**: 易于扩展和配置
 
 ## 📋 前置要求
 
-- Python 3.9 或更高版本
-- 阿里云账号和 DashScope API 密钥
-- LiveKit 服务器 (可选：使用 LiveKit Cloud 或自建)
+- Python 3.11 或更高版本
+- LiveKit 服务器 (使用 LiveKit Cloud 或自建)
+- API 密钥（根据使用的提供商）：
+  - Google Gemini API Key（LLM）
+  - OpenAI API Key（STT）
+  - MiniMax API Key（TTS）
+  - 或其他支持的提供商
 
 ## 🚀 快速开始
 
@@ -300,6 +307,17 @@ agent.set_active_video_sources(["camera", "screen_share"])
 4. **发送到 LLM**: 在 `on_user_turn_completed` 钩子中，将图像添加到用户消息中
 5. **多模态理解**: Qwen-VL 模型同时理解文本和图像内容
 
+### 视频轨道事件处理
+
+Agent 会自动处理以下视频轨道事件：
+
+| 事件 | 触发场景 | 处理行为 |
+|------|---------|---------|
+| `track_subscribed` | 用户开启摄像头/屏幕分享 | 开始接收视频帧 |
+| `track_unsubscribed` | 用户离开房间 | 清除帧缓存 |
+| `track_muted` | 用户关闭摄像头/屏幕分享 | 清除帧缓存 |
+| `track_unmuted` | 用户重新开启 | 记录日志 |
+
 #### 依赖说明
 
 视觉分析功能需要 **`livekit-agents[images]`** 扩展：
@@ -336,12 +354,40 @@ Agent 会基于实时捕获的视频帧给出准确的回答。
 
 ```
 livekit-agent-worker/
-├── agent.py              # 主应用文件
-├── requirements.txt      # Python 依赖
-├── .env                  # 环境变量配置（不提交到 git）
-├── .env.example          # 环境变量模板
-├── .gitignore           # Git 忽略配置
-└── README.md            # 项目文档
+├── agent.py                    # 主入口文件
+├── requirements.txt            # Python 依赖
+├── Dockerfile                  # Docker 构建文件
+├── .env                        # 环境变量配置（不提交到 git）
+├── .env.example                # 环境变量模板
+├── livekit_agent/              # 核心模块
+│   ├── config/                 # 配置管理
+│   │   └── settings.py         # 统一配置类
+│   ├── core/                   # 核心功能
+│   │   ├── entrypoint.py       # Agent 入口点
+│   │   ├── session_factory.py  # Session 工厂
+│   │   └── vision_agent.py     # VisionAgent 实现
+│   ├── models/                 # 数据模型
+│   │   ├── api_response.py     # API 响应模型
+│   │   └── user_context.py     # 用户上下文
+│   ├── providers/              # AI 提供商工厂
+│   │   ├── llm_provider.py     # LLM 提供商
+│   │   ├── stt_provider.py     # STT 提供商
+│   │   └── tts_provider.py     # TTS 提供商
+│   ├── services/               # API 服务
+│   │   ├── base_client.py      # HTTP 客户端基类
+│   │   ├── chat_api.py         # Chat API 客户端
+│   │   ├── user_api.py         # User API 客户端
+│   │   └── vision_api.py       # Vision API 客户端
+│   ├── utils/                  # 工具函数
+│   │   ├── latency.py          # 延迟统计
+│   │   ├── logger.py           # 日志工具
+│   │   └── room_parser.py      # 房间名解析
+│   └── video/                  # 视频处理
+│       ├── frame_manager.py    # 视频帧管理
+│       └── track_processor.py  # 轨道处理
+├── livekit-plugins-minimax-tts/ # MiniMax TTS 插件
+└── scripts/
+    └── setup.sh                # 安装脚本
 ```
 
 ## 🛠️ 开发指南
