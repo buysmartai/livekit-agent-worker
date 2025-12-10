@@ -127,6 +127,37 @@ def setup_track_subscription(
             frame_manager.clear_frame(source_type)
             logger.info(f"🗑️  已清除 {source_type} 视频帧缓存")
     
+    @room.on("track_muted")
+    def on_track_muted(
+        participant: rtc.Participant,
+        publication: rtc.TrackPublication,
+    ):
+        """当轨道被静音/关闭时，清除对应的视频帧缓存"""
+        if publication.kind == rtc.TrackKind.KIND_VIDEO:
+            source_type = get_source_type_from_publication(publication)
+            
+            logger.info(
+                f"🔇 视频轨道已关闭(muted): participant={participant.identity}, "
+                f"source={publication.source}, type={source_type}"
+            )
+            
+            # 清除对应的视频帧
+            frame_manager.clear_frame(source_type)
+            logger.info(f"🗑️  已清除 {source_type} 视频帧缓存 (muted)")
+    
+    @room.on("track_unmuted")
+    def on_track_unmuted(
+        participant: rtc.Participant,
+        publication: rtc.TrackPublication,
+    ):
+        """当轨道被取消静音/重新开启时，记录日志"""
+        if publication.kind == rtc.TrackKind.KIND_VIDEO:
+            source_type = get_source_type_from_publication(publication)
+            logger.info(
+                f"🔊 视频轨道已开启(unmuted): participant={participant.identity}, "
+                f"source={publication.source}, type={source_type}"
+            )
+    
     logger.info("✅ 视频轨道订阅已设置")
 
 
