@@ -8,6 +8,7 @@ from typing import Optional
 
 from livekit.agents.voice import AgentSession, VoiceActivityVideoSampler
 from livekit.plugins import silero
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from ..providers import LLMProviderFactory, TTSProviderFactory, STTProviderFactory
 from ..config import get_settings
@@ -57,7 +58,12 @@ def create_session(voice_id: Optional[str] = None) -> AgentSession:
         activation_threshold=0.6,     # 语音激活阈值，越高越不容易被噪音触发（0.5-0.9）
         sample_rate=16000,
     )
+
     logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤, threshold=0.6)")
+
+    # 创建 Turn Detector (智能轮次检测)
+    turn_detector = MultilingualModel()
+    logger.info("   ✅ TurnDetector: MultilingualModel (智能轮次检测)")
 
     # 创建视频采样器
     video_sampler = VoiceActivityVideoSampler(
@@ -71,7 +77,8 @@ def create_session(voice_id: Optional[str] = None) -> AgentSession:
         stt=stt,
         tts=tts,
         llm=llm,
-        vad=vad,  # 添加 VAD 支持打断和噪音过滤
+        vad=vad,  # VAD 支持打断和噪音过滤
+        turn_detection=turn_detector,  # 智能轮次检测（基于语言理解判断用户是否说完）
         video_sampler=video_sampler,
     )
     

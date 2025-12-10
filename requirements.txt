@@ -17,6 +17,9 @@ livekit-plugins-openai>=1.2.9
 
 # Silero VAD - 用于语音活动检测、打断功能和噪音过滤
 livekit-plugins-silero>=1.2.9
+
+# Turn Detector - 智能轮次检测（基于语言理解）
+livekit-plugins-turn-detector>=1.2.9
 openai
 
 # HTTP 客户端 - 用于 REST API 调用
