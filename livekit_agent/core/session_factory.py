@@ -7,6 +7,7 @@ Session 工厂
 from typing import Optional
 
 from livekit.agents.voice import AgentSession, VoiceActivityVideoSampler
+from livekit.plugins import silero
 
 from ..providers import LLMProviderFactory, TTSProviderFactory, STTProviderFactory
 from ..config import get_settings
@@ -49,6 +50,15 @@ def create_session(voice_id: Optional[str] = None) -> AgentSession:
     llm = LLMProviderFactory.create(settings.llm)
     logger.info(f"   ✅ LLM: {settings.llm.provider} / {settings.llm.model}")
     
+    # 创建 VAD (用于打断检测和噪音过滤)
+    vad = silero.VAD.load(
+        min_speech_duration=0.1,      # 最小语音持续时间（秒），过滤短噪音
+        min_silence_duration=0.5,     # 静音多久算说话结束（秒）
+        activation_threshold=0.5,     # 语音激活阈值，越高越不容易被噪音触发
+        sample_rate=16000,
+    )
+    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤)")
+
     # 创建视频采样器
     video_sampler = VoiceActivityVideoSampler(
         speaking_fps=settings.video.speaking_fps,
@@ -61,6 +71,7 @@ def create_session(voice_id: Optional[str] = None) -> AgentSession:
         stt=stt,
         tts=tts,
         llm=llm,
+        vad=vad,  # 添加 VAD 支持打断和噪音过滤
         video_sampler=video_sampler,
     )
     
