@@ -52,12 +52,12 @@ def create_session(voice_id: Optional[str] = None) -> AgentSession:
     
     # 创建 VAD (用于打断检测和噪音过滤)
     vad = silero.VAD.load(
-        min_speech_duration=0.1,      # 最小语音持续时间（秒），过滤短噪音
-        min_silence_duration=0.5,     # 静音多久算说话结束（秒）
-        activation_threshold=0.5,     # 语音激活阈值，越高越不容易被噪音触发
+        min_speech_duration=0.15,     # 最小语音持续时间（秒），过滤短噪音
+        min_silence_duration=0.6,     # 静音多久算说话结束（秒）
+        activation_threshold=0.6,     # 语音激活阈值，越高越不容易被噪音触发（0.5-0.9）
         sample_rate=16000,
     )
-    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤)")
+    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤, threshold=0.6)")
 
     # 创建视频采样器
     video_sampler = VoiceActivityVideoSampler(
