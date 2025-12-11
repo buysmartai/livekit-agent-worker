@@ -23,12 +23,13 @@ async def entrypoint(ctx: JobContext) -> None:
     
     当 LiveKit 房间创建或 Agent 被调用时，该函数会被执行。
     
-    房间名称格式: {userId}_{avatarId}_{timestamp}
+    房间名称格式: {userId}_{avatarId}_{language}_{ts}
     例如: abc123_def456_1701590400
     
     Args:
         ctx: JobContext，包含房间信息
     """
+    
     room_name = ctx.room.name
     logger.info("=" * 80)
     logger.info(f"🏠 连接到房间: {room_name}")
@@ -44,17 +45,23 @@ async def entrypoint(ctx: JobContext) -> None:
     
     # 3. 动态获取 Avatar 语音配置
     voice_id = None
+    elevenlabs_voice_id = None
     if agent._avatar_id and agent._avatar_id != "default_avatar":
         logger.info(f"🎤 正在获取 Avatar {agent._avatar_id} 的语音配置...")
         voice_info = await agent.get_avatar_voice_info(agent._avatar_id, agent._user_id)
-        if voice_info and voice_info.get("voiceApiId"):
-            voice_id = voice_info["voiceApiId"]
-            logger.info(f"✅ 使用动态 voice_id: {voice_id}")
+        if voice_info:
+            if voice_info.get("voiceApiId"):
+                voice_id = voice_info["voiceApiId"]
+                logger.info(f"✅ MiniMax voice_id: {voice_id}")
+            if voice_info.get("elevenlabsApiId"):
+                elevenlabs_voice_id = voice_info["elevenlabsApiId"]
+                logger.info(f"✅ ElevenLabs voice_id: {elevenlabs_voice_id}")
         else:
             logger.warning(f"⚠️  无法获取 Avatar 语音配置，使用默认 voice_id")
     
-    # 4. 创建 Session
-    session = create_session(voice_id=voice_id)
+    # 4. 创建 Session（根据语言选择 TTS）
+    language = agent._user_context.language
+    session = create_session(voice_id=voice_id, elevenlabs_voice_id=elevenlabs_voice_id, language=language)
     
     # 5. 注册事件处理
     _register_event_handlers(session, agent)

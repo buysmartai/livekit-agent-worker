@@ -17,22 +17,28 @@ from ..utils.logger import get_logger
 logger = get_logger("core.session_factory")
 
 
-def create_session(voice_id: Optional[str] = None) -> AgentSession:
+def create_session(
+    voice_id: Optional[str] = None,
+    elevenlabs_voice_id: Optional[str] = None,
+    language: str = "en"
+) -> AgentSession:
     """
     创建 AgentSession
     
     根据配置创建 STT、TTS、LLM 实例，并组装成 AgentSession。
     
     Args:
-        voice_id: 可选的 voice_id，覆盖默认配置
+        voice_id: MiniMax voice_id，用于非中文语言
+        elevenlabs_voice_id: ElevenLabs voice_id，用于中文语言
+        language: 语言代码，如果以 zh 开头则使用 ElevenLabs TTS
         
     Returns:
         配置好的 AgentSession
         
     Examples:
         >>> session = create_session()
-        >>> # 或使用自定义 voice_id
-        >>> session = create_session(voice_id="custom_voice")
+        >>> # 或使用自定义 voice_id 和语言
+        >>> session = create_session(voice_id="minimax_voice", elevenlabs_voice_id="elevenlabs_voice", language="zh-CN")
     """
     settings = get_settings()
     
@@ -42,10 +48,22 @@ def create_session(voice_id: Optional[str] = None) -> AgentSession:
     stt = STTProviderFactory.create(settings.stt)
     logger.info(f"   ✅ STT: {settings.stt.provider} / {settings.stt.model}")
     
-    # 创建 TTS
-    tts = TTSProviderFactory.create(settings.tts, voice_id)
-    actual_voice_id = voice_id or settings.tts.default_voice_id
-    logger.info(f"   ✅ TTS: {settings.tts.provider} / {actual_voice_id}")
+    # 创建 TTS - 根据语言选择提供商
+    is_chinese = language.lower().startswith("zh")
+    if is_chinese:
+        # 中文使用 ElevenLabs
+        from livekit.plugins import elevenlabs
+        actual_elevenlabs_voice_id = elevenlabs_voice_id or "JBFqnCBsd6RMkjVDRZzb"  # 默认 voice
+        tts = elevenlabs.TTS(
+            voice_id=actual_elevenlabs_voice_id,
+            model="eleven_turbo_v2_5",
+        )
+        logger.info(f"   ✅ TTS: elevenlabs (中文模式) / {actual_elevenlabs_voice_id}")
+    else:
+        # 其他语言使用配置的 TTS（MiniMax）
+        tts = TTSProviderFactory.create(settings.tts, voice_id)
+        actual_voice_id = voice_id or settings.tts.default_voice_id
+        logger.info(f"   ✅ TTS: {settings.tts.provider} / {actual_voice_id}")
     
     # 创建 LLM
     llm = LLMProviderFactory.create(settings.llm)

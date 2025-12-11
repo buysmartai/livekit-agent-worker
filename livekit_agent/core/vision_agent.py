@@ -133,6 +133,7 @@ class VisionAgent(Agent):
         if voice_info:
             return {
                 "voiceApiId": voice_info.voice_api_id,
+                "elevenlabsApiId": voice_info.elevenlabs_api_id,
                 "audioUrl": voice_info.audio_url,
                 "description": voice_info.description,
             }
