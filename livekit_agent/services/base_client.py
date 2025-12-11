@@ -95,8 +95,13 @@ class BaseAPIClient(ABC):
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             
             if response.status_code == 200:
-                result = response.json()
-                return result, elapsed_ms
+                try:
+                    result = response.json()
+                    return result, elapsed_ms
+                except Exception as json_err:
+                    logger.error(f"❌ JSON 解析失败: {json_err}")
+                    logger.error(f"响应内容: {response.text[:500]}")
+                    return None, elapsed_ms
             else:
                 logger.error(f"❌ HTTP {response.status_code}: {url}")
                 logger.error(f"响应内容: {response.text[:200]}")

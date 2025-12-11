@@ -11,7 +11,7 @@ from livekit.agents import JobContext, ConversationItemAddedEvent
 
 from .vision_agent import VisionAgent
 from .session_factory import create_session
-from ..video import VideoFrameManager, process_video_track, setup_track_subscription, process_existing_tracks
+from ..video import VideoFrameManager, process_video_track, setup_track_subscription, process_existing_tracks, ScreenUploader
 from ..utils.logger import get_logger
 
 logger = get_logger("core.entrypoint")
@@ -82,6 +82,14 @@ async def entrypoint(ctx: JobContext) -> None:
     setup_track_subscription(ctx.room, agent._frame_manager)
     process_existing_tracks(ctx.room, agent._frame_manager)
     
+    # 9. 启动屏幕帧上传器（每 3 秒上传一次屏幕分享帧）
+    screen_uploader = ScreenUploader(
+        frame_manager=agent._frame_manager,
+        user_context=agent._user_context,
+        upload_interval=3.0,
+    )
+    screen_uploader.start()
+
     logger.info("Agent 已成功启动并连接到房间")
 
 

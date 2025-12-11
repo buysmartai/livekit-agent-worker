@@ -7,6 +7,7 @@ from .track_processor import (
     process_existing_tracks,
     get_source_type_from_publication,
 )
+from .screen_uploader import ScreenUploader
 
 __all__ = [
     "VideoFrameManager",
@@ -14,4 +15,5 @@ __all__ = [
     "setup_track_subscription",
     "process_existing_tracks",
     "get_source_type_from_publication",
+    "ScreenUploader",
 ]
