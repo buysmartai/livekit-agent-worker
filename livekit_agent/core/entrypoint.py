@@ -98,8 +98,8 @@ async def entrypoint(ctx: JobContext) -> None:
     logger.info("Agent 已成功启动并连接到房间")
     
     # 11. 监听房间断开事件，调用 completeVoiceChat
-    @ctx.room.on("disconnected")
-    async def on_room_disconnected():
+    async def _handle_room_disconnected():
+        """处理房间断开事件"""
         logger.info("🔌 房间已断开连接")
         # 停止屏幕上传器
         await screen_uploader.close()
@@ -107,6 +107,10 @@ async def entrypoint(ctx: JobContext) -> None:
         await chat_client.complete_voice_chat(agent._user_context)
         await chat_client.close()
         logger.info("✅ 已完成清理工作")
+    
+    @ctx.room.on("disconnected")
+    def on_room_disconnected():
+        asyncio.create_task(_handle_room_disconnected())
 
 
 def _register_event_handlers(session, agent: VisionAgent) -> None:
