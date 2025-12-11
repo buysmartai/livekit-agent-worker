@@ -23,6 +23,9 @@ RUN pip install --no-cache-dir ./livekit-plugins-minimax-tts/
 COPY agent.py .
 COPY livekit_agent/ ./livekit_agent/
 
+# 下载 Turn Detector 模型（需要在复制代码后执行）
+RUN python agent.py download-files
+
 # 创建非 root 用户
 RUN useradd -m -u 1000 livekit && chown -R livekit:livekit /app
 USER livekit
