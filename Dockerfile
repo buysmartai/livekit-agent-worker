@@ -23,12 +23,17 @@ RUN pip install --no-cache-dir ./livekit-plugins-minimax-tts/
 COPY agent.py .
 COPY livekit_agent/ ./livekit_agent/
 
-# 下载 Turn Detector 模型（需要在复制代码后执行）
-RUN python agent.py download-files
-
-# 创建非 root 用户
+# 创建非 root 用户（先创建用户，确保模型下载到正确的缓存目录）
 RUN useradd -m -u 1000 livekit && chown -R livekit:livekit /app
+
+# 切换到 livekit 用户
 USER livekit
+
+# 设置 Hugging Face 缓存目录到 /app 下（确保模型被保存在镜像中）
+ENV HF_HOME=/app/.cache/huggingface
+
+# 下载 Turn Detector 和 Silero 模型
+RUN python agent.py download-files
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
