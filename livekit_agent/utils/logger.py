@@ -32,16 +32,18 @@ def setup_logger(
     Returns:
         配置好的 logger
     """
-    # 配置根 logger
-    logging.basicConfig(
-        level=level,
-        format=format,
-        stream=stream,
-    )
-    
     # 获取模块根 logger
     logger = logging.getLogger(ROOT_LOGGER_NAME)
+    
+    # 避免重复添加 handler
+    if not logger.handlers:
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logging.Formatter(format))
+        logger.addHandler(handler)
+    
     logger.setLevel(level)
+    # 防止日志向上传递到 root logger，避免重复输出
+    logger.propagate = False
     
     return logger
 
