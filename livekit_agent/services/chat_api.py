@@ -146,3 +146,75 @@ class ChatAPIClient(BaseAPIClient):
             code = result.get("code") if result else "N/A"
             logger.warning(f"⚠️  saveGptResult 失败: {code} (耗时: {elapsed_ms:.2f}ms)")
             return False
+
+    async def start_voice_chat(self, user_context: UserContext) -> bool:
+        """
+        调用 startVoiceChat API 开始语音聊天会话
+        
+        Args:
+            user_context: 用户上下文
+            
+        Returns:
+            是否成功
+        """
+        if not self.is_available:
+            logger.error("❌ HTTP 客户端未初始化")
+            return False
+        
+        ctx = user_context.to_dict()
+        
+        request_body = self._build_common_request_body(
+            userId=ctx["user_id"],
+            avatarId=ctx["avatar_id"],
+            sessionId=ctx["session_id"],
+            timezone=ctx["timezone"],
+        )
+        
+        logger.info(f"🎤 调用 startVoiceChat API: userId={ctx['user_id']}, sessionId={ctx['session_id']}")
+        
+        result, elapsed_ms = await self._request("POST", "voiceChat/startVoiceChat", request_body)
+        
+        if result and result.get("code") == "0":
+            logger.info(f"✅ startVoiceChat 成功 (耗时: {elapsed_ms:.2f}ms)")
+            return True
+        else:
+            code = result.get("code") if result else "N/A"
+            msg = result.get("msg", "") if result else ""
+            logger.warning(f"⚠️  startVoiceChat 失败: code={code}, msg={msg} (耗时: {elapsed_ms:.2f}ms)")
+            return False
+
+    async def complete_voice_chat(self, user_context: UserContext) -> bool:
+        """
+        调用 completeVoiceChat API 结束语音聊天会话
+        
+        Args:
+            user_context: 用户上下文
+            
+        Returns:
+            是否成功
+        """
+        if not self.is_available:
+            logger.error("❌ HTTP 客户端未初始化")
+            return False
+        
+        ctx = user_context.to_dict()
+        
+        request_body = self._build_common_request_body(
+            userId=ctx["user_id"],
+            avatarId=ctx["avatar_id"],
+            sessionId=ctx["session_id"],
+            timezone=ctx["timezone"],
+        )
+        
+        logger.info(f"🔚 调用 completeVoiceChat API: userId={ctx['user_id']}, sessionId={ctx['session_id']}")
+        
+        result, elapsed_ms = await self._request("POST", "voiceChat/completeVoiceChat", request_body)
+        
+        if result and result.get("code") == "0":
+            logger.info(f"✅ completeVoiceChat 成功 (耗时: {elapsed_ms:.2f}ms)")
+            return True
+        else:
+            code = result.get("code") if result else "N/A"
+            msg = result.get("msg", "") if result else ""
+            logger.warning(f"⚠️  completeVoiceChat 失败: code={code}, msg={msg} (耗时: {elapsed_ms:.2f}ms)")
+            return False

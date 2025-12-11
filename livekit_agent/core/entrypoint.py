@@ -12,6 +12,7 @@ from livekit.agents import JobContext, ConversationItemAddedEvent
 from .vision_agent import VisionAgent
 from .session_factory import create_session
 from ..video import VideoFrameManager, process_video_track, setup_track_subscription, process_existing_tracks, ScreenUploader
+from ..services import ChatAPIClient
 from ..utils.logger import get_logger
 
 logger = get_logger("core.entrypoint")
@@ -90,7 +91,22 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     screen_uploader.start()
 
+    # 10. 调用 startVoiceChat API
+    chat_client = ChatAPIClient(agent._chat_api._config)
+    await chat_client.start_voice_chat(agent._user_context)
+
     logger.info("Agent 已成功启动并连接到房间")
+    
+    # 11. 监听房间断开事件，调用 completeVoiceChat
+    @ctx.room.on("disconnected")
+    async def on_room_disconnected():
+        logger.info("🔌 房间已断开连接")
+        # 停止屏幕上传器
+        await screen_uploader.close()
+        # 调用 completeVoiceChat API
+        await chat_client.complete_voice_chat(agent._user_context)
+        await chat_client.close()
+        logger.info("✅ 已完成清理工作")
 
 
 def _register_event_handlers(session, agent: VisionAgent) -> None:
