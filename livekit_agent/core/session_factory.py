@@ -43,6 +43,8 @@ def create_session(
     settings = get_settings()
     
     logger.info("🔧 创建 AgentSession...")
+    # language
+    logger.info(f"   🌐 语言: {language}")
     
     # 创建 STT
     stt = STTProviderFactory.create(settings.stt)
@@ -51,19 +53,19 @@ def create_session(
     # 创建 TTS - 根据语言选择提供商
     is_chinese = language.lower().startswith("zh")
     if is_chinese:
-        # 中文使用 ElevenLabs
+        # 中文使用 MiniMax
+        tts = TTSProviderFactory.create(settings.tts, voice_id)
+        actual_voice_id = voice_id or settings.tts.default_voice_id
+        logger.info(f"   ✅ TTS: {settings.tts.provider} (中文模式) / {actual_voice_id}")
+    else:
+        # 非中文使用 ElevenLabs
         from livekit.plugins import elevenlabs
         actual_elevenlabs_voice_id = elevenlabs_voice_id or "JBFqnCBsd6RMkjVDRZzb"  # 默认 voice
         tts = elevenlabs.TTS(
             voice_id=actual_elevenlabs_voice_id,
             model="eleven_turbo_v2_5",
         )
-        logger.info(f"   ✅ TTS: elevenlabs (中文模式) / {actual_elevenlabs_voice_id}")
-    else:
-        # 其他语言使用配置的 TTS（MiniMax）
-        tts = TTSProviderFactory.create(settings.tts, voice_id)
-        actual_voice_id = voice_id or settings.tts.default_voice_id
-        logger.info(f"   ✅ TTS: {settings.tts.provider} / {actual_voice_id}")
+        logger.info(f"   ✅ TTS: elevenlabs / {actual_elevenlabs_voice_id}")
     
     # 创建 LLM
     llm = LLMProviderFactory.create(settings.llm)
