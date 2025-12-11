@@ -9,7 +9,7 @@ from typing import Optional
 
 from livekit import rtc
 from livekit.agents import utils
-from livekit.agents.utils.images import EncodeOptions, ResizeOptions
+from livekit.agents.utils.images import EncodeOptions
 
 from .frame_manager import VideoFrameManager
 from ..services.knowledge_api import KnowledgeAPIClient
@@ -28,8 +28,6 @@ class ScreenUploader:
     """
     
     DEFAULT_INTERVAL = 3.0  # 默认上传间隔（秒）
-    MAX_IMAGE_WIDTH = 1280  # 最大图片宽度
-    MAX_IMAGE_HEIGHT = 720  # 最大图片高度
     
     def __init__(
         self,
@@ -113,22 +111,15 @@ class ScreenUploader:
             return
         
         try:
-            # 编码为 PNG，限制尺寸
-            encode_options = EncodeOptions(
-                format="PNG",
-                resize_options=ResizeOptions(
-                    width=self.MAX_IMAGE_WIDTH,
-                    height=self.MAX_IMAGE_HEIGHT,
-                    strategy="fit",
-                ),
-            )
+            # 编码为 PNG
+            encode_options = EncodeOptions(format="PNG")
             encoded_data = utils.images.encode(screen_frame, encode_options)
             
             if encoded_data is None:
                 logger.warning("⚠️  屏幕帧编码失败")
                 return
             
-            logger.info(f"📸 屏幕帧已编码，大小: {len(encoded_data) / 1024:.1f} KB")
+            logger.info(f"📸 屏幕帧已编码为 PNG，大小: {len(encoded_data)} bytes")
             
             # 上传到后端
             success = await self._knowledge_client.update_vv_knowledge(
