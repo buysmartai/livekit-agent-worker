@@ -75,7 +75,7 @@ def create_session(
     vad = silero.VAD.load(
         min_speech_duration=0.3,      # 最小语音持续时间（秒），过滤短噪音（提高以过滤背景声）
         min_silence_duration=0.6,     # 静音多久算说话结束（秒）
-        activation_threshold=0.75,    # 语音激活阈值，越高越不容易被噪音触发（提高以过滤背景人声）
+        activation_threshold=0.85,    # 语音激活阈值，越高越不容易被噪音触发（提高以过滤背景人声）
         sample_rate=16000,
     )
 
