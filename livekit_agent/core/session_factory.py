@@ -73,13 +73,13 @@ def create_session(
     
     # 创建 VAD (用于打断检测和噪音过滤)
     vad = silero.VAD.load(
-        min_speech_duration=0.15,     # 最小语音持续时间（秒），过滤短噪音
+        min_speech_duration=0.3,      # 最小语音持续时间（秒），过滤短噪音（提高以过滤背景声）
         min_silence_duration=0.6,     # 静音多久算说话结束（秒）
-        activation_threshold=0.6,     # 语音激活阈值，越高越不容易被噪音触发（0.5-0.9）
+        activation_threshold=0.75,    # 语音激活阈值，越高越不容易被噪音触发（提高以过滤背景人声）
         sample_rate=16000,
     )
 
-    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤, threshold=0.6)")
+    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤, threshold=0.75)")
 
     # 创建 Turn Detector (智能轮次检测)
     turn_detector = MultilingualModel()
@@ -100,6 +100,9 @@ def create_session(
         vad=vad,  # VAD 支持打断和噪音过滤
         turn_detection=turn_detector,  # 智能轮次检测（基于语言理解判断用户是否说完）
         video_sampler=video_sampler,
+        # 打断相关参数 - 减少背景噪音误打断
+        min_interruption_duration=0.8,  # 最小打断持续时间（秒），提高以忽略短暂噪音
+        min_interruption_words=2,       # 最少需要识别出2个词才算打断
     )
     
     logger.info("✅ AgentSession 创建完成")
