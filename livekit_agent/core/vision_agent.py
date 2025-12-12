@@ -251,6 +251,51 @@ class VisionAgent(Agent):
 
         logger.info(f"✅ chat_ctx 重建完成，共 {len(chat_ctx.items)} 条消息")
 
+    def _inject_visual_mode_instruction(self, chat_ctx: llm.ChatContext) -> None:
+        """
+        在用户消息开头注入 visual_input_mode 说明
+        
+        当用户正在分享屏幕时，在 user prompt 开头添加说明，
+        告知 LLM 这是实时屏幕流而非静态截图。
+        """
+        # 检查是否有屏幕分享帧
+        has_screen_share = self._frame_manager.get_frame("screen_share") is not None
+        
+        if not has_screen_share:
+            return
+        
+        # 查找最后一条用户消息
+        user_message = None
+        for item in reversed(chat_ctx.items):
+            if isinstance(item, llm.ChatMessage) and item.role == "user":
+                user_message = item
+                break
+        
+        if not user_message:
+            return
+        
+        # 构建 visual_input_mode 说明
+        visual_mode_text = """<visual_input_mode>
+- The user is sharing a LIVE mobile screen or participating in a real-time video/screen-sharing session.
+- All visual inputs should be treated as a continuous live feed, NOT as static screenshots or photos.
+- Do NOT assume the image is a captured moment, posed photo, or intentionally framed picture.
+</visual_input_mode>
+
+"""
+        
+        # 在用户消息内容开头添加
+        if isinstance(user_message.content, list) and len(user_message.content) > 0:
+            # 内容是列表，找到第一个文本内容并在其开头添加
+            for i, content_item in enumerate(user_message.content):
+                if isinstance(content_item, str):
+                    user_message.content[i] = visual_mode_text + content_item
+                    logger.info("✅ 已在 user message 开头注入 visual_input_mode 说明（屏幕分享模式）")
+                    break
+        elif isinstance(user_message.content, str):
+            # 内容是字符串
+            user_message.content = visual_mode_text + user_message.content
+            logger.info("✅ 已在 user message 开头注入 visual_input_mode 说明（屏幕分享模式）")
+
     def _add_video_frames_to_message(self, chat_ctx: llm.ChatContext) -> None:
         """将视频帧添加到用户消息"""
         # 查找用户消息
@@ -357,10 +402,13 @@ class VisionAgent(Agent):
             else:
                 logger.warning("⚠️  未能获取动态 prompt，使用默认配置")
         
-        # 3. 添加视频帧
+        # 3. 注入 visual_input_mode 说明（如果有屏幕分享）
+        self._inject_visual_mode_instruction(chat_ctx)
+        
+        # 4. 添加视频帧
         self._add_video_frames_to_message(chat_ctx)
         
-        # 4. 调用 LLM
+        # 5. 调用 LLM
         is_first_token = True
         async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
             if is_first_token:
