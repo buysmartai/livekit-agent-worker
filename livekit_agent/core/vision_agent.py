@@ -10,14 +10,16 @@ VisionAgent - 支持视觉分析的自定义 Agent
 
 from __future__ import annotations
 
+import numpy as np
 from typing import Optional, AsyncIterable, Union, List
 
 from livekit.agents.voice import Agent, ModelSettings
-from livekit.agents import llm
+from livekit.agents import llm, stt
+from livekit import rtc
 
 from ..services import ChatAPIClient, UserAPIClient, VisionAPIClient
 from ..video import VideoFrameManager
-from ..utils import LatencyTracker, RoomNameParser, get_logger
+from ..utils import LatencyTracker, RoomNameParser, get_logger, AudioDenoiser
 from ..models import UserContext, PromptResponse, PingbackData
 from ..config import get_settings
 
@@ -61,7 +63,19 @@ class VisionAgent(Agent):
         # 最后一次 API 调用的 pingback 数据
         self._last_pingback: Optional[PingbackData] = None
         
+        # 音频降噪器 - 用于过滤远处的声音
+        # prop_decrease: 降噪强度，0.7 表示降低 70% 的噪声能量
+        self._audio_denoiser = AudioDenoiser(
+            prop_decrease=settings.audio.denoise_strength if hasattr(settings, 'audio') else 0.7,
+            stationary=True,
+            n_fft=512,
+            hop_length=128,
+        )
+        self._denoise_log_counter = 0
+        self._denoise_log_interval = 100  # 每 100 帧打印一次日志
+        
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._frame_manager.active_sources}")
+        logger.info(f"🔊 音频降噪器状态: {'已启用' if self._audio_denoiser.is_available else '未启用'}")
     
     # ========== 属性访问器（向后兼容） ==========
     
@@ -418,6 +432,73 @@ class VisionAgent(Agent):
         
         # 5. 记录完成时间
         self._latency_tracker.record_llm_complete()
+    
+    # ========== STT 节点（音频预处理） ==========
+    
+    async def stt_node(
+        self,
+        audio: AsyncIterable[rtc.AudioFrame],
+        model_settings: ModelSettings,
+    ) -> Optional[AsyncIterable[stt.SpeechEvent]]:
+        """
+        STT 节点 - 在语音转文字前对音频进行降噪处理
+        
+        这个方法拦截原始音频流，应用降噪处理后再传递给 STT 引擎。
+        主要目的是过滤远处的声音干扰。
+        
+        Args:
+            audio: 原始音频帧流
+            model_settings: 模型设置
+            
+        Returns:
+            STT 事件流
+        """
+        # 如果降噪器不可用，直接使用默认处理
+        if not self._audio_denoiser.is_available:
+            logger.debug("降噪器不可用，使用默认 STT 处理")
+            return Agent.default.stt_node(self, audio, model_settings)
+        
+        # 创建降噪后的音频流生成器
+        async def denoised_audio_stream() -> AsyncIterable[rtc.AudioFrame]:
+            async for frame in audio:
+                try:
+                    # 获取帧数据
+                    frame_data = frame.data.tobytes()
+                    sample_rate = frame.sample_rate
+                    num_channels = frame.num_channels
+                    samples_per_channel = frame.samples_per_channel
+                    
+                    # 应用降噪
+                    denoised_data = self._audio_denoiser.process_frame(
+                        frame_data=frame_data,
+                        sample_rate=sample_rate,
+                        num_channels=num_channels,
+                        samples_per_channel=samples_per_channel,
+                    )
+                    
+                    # 创建新的音频帧
+                    denoised_array = np.frombuffer(denoised_data, dtype=np.int16)
+                    denoised_frame = rtc.AudioFrame(
+                        data=denoised_array,
+                        sample_rate=sample_rate,
+                        num_channels=num_channels,
+                        samples_per_channel=samples_per_channel,
+                    )
+                    
+                    # 定期记录日志
+                    self._denoise_log_counter += 1
+                    if self._denoise_log_counter % self._denoise_log_interval == 0:
+                        logger.debug(f"🔊 已处理 {self._denoise_log_counter} 帧音频（降噪中）")
+                    
+                    yield denoised_frame
+                    
+                except Exception as e:
+                    # 出错时返回原始帧
+                    logger.error(f"❌ 音频帧降噪失败: {e}")
+                    yield frame
+        
+        # 使用降噪后的音频流调用默认 STT 处理
+        return Agent.default.stt_node(self, denoised_audio_stream(), model_settings)
     
     # ========== 资源清理 ==========
     
