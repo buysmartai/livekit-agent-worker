@@ -72,14 +72,17 @@ def create_session(
     logger.info(f"   ✅ LLM: {settings.llm.provider} / {settings.llm.model}")
     
     # 创建 VAD (用于打断检测和噪音过滤)
+    # 注意：activation_threshold 范围是 0-1，不是音量阈值，是语音概率阈值
+    # 设置太高(如1)会导致几乎所有语音都被忽略！
     vad = silero.VAD.load(
-        min_speech_duration=0.3,      # 最小语音持续时间（秒），过滤短噪音（提高以过滤背景声）
-        min_silence_duration=0.6,     # 静音多久算说话结束（秒）
-        activation_threshold=0.85,    # 语音激活阈值，越高越不容易被噪音触发（提高以过滤背景人声）
+        min_speech_duration=0.5,      # 最小语音持续时间（秒），提高可过滤短暂背景声
+        min_silence_duration=0.5,     # 静音多久算说话结束（秒）
+        prefix_padding_duration=0.3,  # 语音开始前保留的填充时间
+        activation_threshold=0.7,     # 语音激活阈值 (0-1)，默认0.5，提高可减少误触发
         sample_rate=16000,
     )
 
-    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤, threshold=0.75)")
+    logger.info("   ✅ VAD: silero (打断检测 + 噪音过滤, threshold=0.7)")
 
     # 创建 Turn Detector (智能轮次检测)
     turn_detector = MultilingualModel()
