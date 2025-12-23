@@ -51,7 +51,7 @@ def create_session(
     logger.info(f"   ✅ STT: {settings.stt.provider} / {settings.stt.model}")
     
     # 创建 TTS - 根据语言选择提供商
-    is_chinese = language.lower().startswith("zh")
+    is_chinese = language.lower().startswith("zh") or True
     if is_chinese:
         # 中文使用 MiniMax
         tts = TTSProviderFactory.create(settings.tts, voice_id)
