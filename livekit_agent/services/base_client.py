@@ -127,7 +127,7 @@ class BaseAPIClient(ABC):
         
         body = {
             "reqId": os.urandom(16).hex(),
-            "timezone": kwargs.get("timezone", os.getenv("TIMEZONE", "Asia/Shanghai")),
+            "timezone": kwargs.get("timezone", os.getenv("TIMEZONE", "America/New_York")),
             "appOs": "livekit",
             "appVersion": "1.0.0",
             "userLocalTime": datetime.now().isoformat(),

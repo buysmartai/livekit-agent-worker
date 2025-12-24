@@ -460,7 +460,7 @@ class Settings:
     stt: STTConfig
     
     # 其他配置
-    timezone: str = "Asia/Shanghai"
+    timezone: str = "America/New_York"
     language: str = "en"
     
     @classmethod
@@ -491,7 +491,7 @@ class Settings:
                 provider=os.getenv("STT_PROVIDER", "openai"),
                 model=os.getenv("STT_MODEL", "gpt-4o-mini-transcribe"),
             ),
-            timezone=os.getenv("TIMEZONE", "Asia/Shanghai"),
+            timezone=os.getenv("TIMEZONE", "America/New_York"),
             language=os.getenv("LANGUAGE", "en"),
         )
 

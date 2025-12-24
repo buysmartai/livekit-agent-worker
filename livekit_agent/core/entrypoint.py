@@ -93,6 +93,10 @@ async def entrypoint(ctx: JobContext) -> None:
         if participant.attributes:
             for key, value in participant.attributes.items():
                 logger.info(f"   - {key}: {value}")
+            # 从 attributes 中获取 timezone 并更新到 user_context
+            if participant.attributes.get("timezone"):
+                agent._user_context.timezone = participant.attributes["timezone"]
+                logger.info(f"✅ 已从 attributes 获取 timezone: {agent._user_context.timezone}")
     
     if not ctx.room.remote_participants:
         logger.info("⚠️  当前没有远程参与者，等待用户加入...")
@@ -112,6 +116,10 @@ async def entrypoint(ctx: JobContext) -> None:
         if participant.attributes:
             for key, value in participant.attributes.items():
                 logger.info(f"   - {key}: {value}")
+            # 从 attributes 中获取 timezone 并更新到 user_context
+            if participant.attributes.get("timezone"):
+                agent._user_context.timezone = participant.attributes["timezone"]
+                logger.info(f"✅ 已从 attributes 获取 timezone: {agent._user_context.timezone}")
     
     # 7.3 监听 attributes 变化事件
     @ctx.room.on("participant_attributes_changed")
@@ -122,6 +130,10 @@ async def entrypoint(ctx: JobContext) -> None:
         logger.info(f"👤 Participant: {participant.identity}")
         logger.info(f"   Changed Attributes: {changed_attributes}")
         logger.info(f"   All Attributes: {participant.attributes}")
+        # 如果 timezone 发生变化，更新 user_context
+        if changed_attributes.get("timezone"):
+            agent._user_context.timezone = changed_attributes["timezone"]
+            logger.info(f"✅ timezone 已更新: {agent._user_context.timezone}")
     
     # 8. 设置视频轨道处理
     setup_track_subscription(ctx.room, agent._frame_manager)

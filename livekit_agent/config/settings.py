@@ -106,7 +106,7 @@ class Settings:
     video: VideoConfig = field(default_factory=VideoConfig)
     
     # 其他配置
-    timezone: str = "Asia/Shanghai"
+    timezone: str = "America/New_York"
     language: str = "en"
     
     @classmethod
@@ -157,7 +157,7 @@ class Settings:
                 inference_height=int(os.getenv("VIDEO_INFERENCE_HEIGHT", "512")),
             ),
             # 其他配置
-            timezone=os.getenv("TIMEZONE", "Asia/Shanghai"),
+            timezone=os.getenv("TIMEZONE", "America/New_York"),
             language=os.getenv("LANGUAGE", "en"),
         )
 

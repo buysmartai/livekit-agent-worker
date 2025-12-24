@@ -17,7 +17,7 @@ class UserContext:
     language: str = "en"  # 语言代码，如 en, zh, zh-CN 等
     session_id: str = "default_session"
     room_name: str = ""
-    timezone: str = field(default_factory=lambda: os.getenv("TIMEZONE", "Asia/Shanghai"))
+    timezone: str = field(default_factory=lambda: os.getenv("TIMEZONE", "America/New_York"))
     is_valid: bool = False
     
     def to_dict(self) -> dict:
