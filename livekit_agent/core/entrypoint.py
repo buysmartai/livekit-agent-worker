@@ -79,6 +79,50 @@ async def entrypoint(ctx: JobContext) -> None:
     # 7. 连接到房间
     await ctx.connect()
     
+    # 7.1 读取并打印所有远程参与者的 attributes
+    logger.info("=" * 60)
+    logger.info("📋 读取 Participant Attributes")
+    logger.info("=" * 60)
+    for participant in ctx.room.remote_participants.values():
+        logger.info(f"👤 Participant Identity: {participant.identity}")
+        logger.info(f"   Name: {participant.name}")
+        logger.info(f"   SID: {participant.sid}")
+        logger.info(f"   Attributes: {participant.attributes}")
+        logger.info(f"   Metadata: {participant.metadata}")
+        # 打印每个 attribute 的详细信息
+        if participant.attributes:
+            for key, value in participant.attributes.items():
+                logger.info(f"   - {key}: {value}")
+    
+    if not ctx.room.remote_participants:
+        logger.info("⚠️  当前没有远程参与者，等待用户加入...")
+    
+    # 7.2 监听新用户加入事件，读取其 attributes
+    @ctx.room.on("participant_connected")
+    def on_participant_connected(participant):
+        logger.info("=" * 60)
+        logger.info(f"🆕 新用户加入房间")
+        logger.info("=" * 60)
+        logger.info(f"👤 Participant Identity: {participant.identity}")
+        logger.info(f"   Name: {participant.name}")
+        logger.info(f"   SID: {participant.sid}")
+        logger.info(f"   Attributes: {participant.attributes}")
+        logger.info(f"   Metadata: {participant.metadata}")
+        # 打印每个 attribute 的详细信息
+        if participant.attributes:
+            for key, value in participant.attributes.items():
+                logger.info(f"   - {key}: {value}")
+    
+    # 7.3 监听 attributes 变化事件
+    @ctx.room.on("participant_attributes_changed")
+    def on_attributes_changed(changed_attributes: dict, participant):
+        logger.info("=" * 60)
+        logger.info(f"🔄 Participant Attributes 已变化")
+        logger.info("=" * 60)
+        logger.info(f"👤 Participant: {participant.identity}")
+        logger.info(f"   Changed Attributes: {changed_attributes}")
+        logger.info(f"   All Attributes: {participant.attributes}")
+    
     # 8. 设置视频轨道处理
     setup_track_subscription(ctx.room, agent._frame_manager)
     process_existing_tracks(ctx.room, agent._frame_manager)
