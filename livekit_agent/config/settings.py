@@ -82,6 +82,16 @@ class STTConfig:
 
 
 @dataclass
+class AudioConfig:
+    """音频处理配置"""
+    denoise_enabled: bool = False  # 默认关闭降噪（节省 CPU）
+    denoise_strength: float = 0.5  # 降噪强度 0.0-1.0
+    denoise_skip_frames: int = 2   # 每 N 帧处理一次（1=每帧，2=隔帧，0=禁用）
+    n_fft: int = 256               # FFT 窗口大小（越小越快，256 比 512 快 4 倍）
+    hop_length: int = 64           # 跳跃长度
+
+
+@dataclass
 class VideoConfig:
     """视频采样配置"""
     speaking_fps: float = 1.0
@@ -104,6 +114,9 @@ class Settings:
     
     # 视频配置
     video: VideoConfig = field(default_factory=VideoConfig)
+    
+    # 音频配置
+    audio: AudioConfig = field(default_factory=AudioConfig)
     
     # 其他配置
     timezone: str = "America/New_York"
@@ -155,6 +168,14 @@ class Settings:
                 silent_fps=float(os.getenv("VIDEO_SILENT_FPS", "0.3")),
                 inference_width=int(os.getenv("VIDEO_INFERENCE_WIDTH", "512")),
                 inference_height=int(os.getenv("VIDEO_INFERENCE_HEIGHT", "512")),
+            ),
+            # 音频配置
+            audio=AudioConfig(
+                denoise_enabled=os.getenv("AUDIO_DENOISE_ENABLED", "false").lower() == "true",
+                denoise_strength=float(os.getenv("AUDIO_DENOISE_STRENGTH", "0.5")),
+                denoise_skip_frames=int(os.getenv("AUDIO_DENOISE_SKIP_FRAMES", "2")),
+                n_fft=int(os.getenv("AUDIO_DENOISE_NFFT", "256")),
+                hop_length=int(os.getenv("AUDIO_DENOISE_HOP_LENGTH", "64")),
             ),
             # 其他配置
             timezone=os.getenv("TIMEZONE", "America/New_York"),

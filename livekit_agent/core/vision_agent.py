@@ -63,19 +63,29 @@ class VisionAgent(Agent):
         # 最后一次 API 调用的 pingback 数据
         self._last_pingback: Optional[PingbackData] = None
         
-        # 音频降噪器 - 用于过滤远处的声音
-        # prop_decrease: 降噪强度，0.7 表示降低 70% 的噪声能量
-        self._audio_denoiser = AudioDenoiser(
-            prop_decrease=settings.audio.denoise_strength if hasattr(settings, 'audio') else 0.7,
-            stationary=True,
-            n_fft=512,
-            hop_length=128,
-        )
+        # 音频降噪器 - 通过环境变量控制是否启用
+        # AUDIO_DENOISE_ENABLED=true 启用，默认关闭以节省 CPU
+        audio_config = settings.audio
+        if audio_config.denoise_enabled:
+            self._audio_denoiser = AudioDenoiser(
+                prop_decrease=audio_config.denoise_strength,
+                stationary=True,
+                n_fft=audio_config.n_fft,
+                hop_length=audio_config.hop_length,
+            )
+            self._denoise_skip_frames = audio_config.denoise_skip_frames
+        else:
+            self._audio_denoiser = AudioDenoiser(prop_decrease=0)  # 禁用
+            self._audio_denoiser._nr_available = False  # 强制禁用
+            self._denoise_skip_frames = 0
+        
         self._denoise_log_counter = 0
-        self._denoise_log_interval = 100  # 每 100 帧打印一次日志
+        self._denoise_frame_counter = 0  # 用于跳帧计数
+        self._denoise_log_interval = 500  # 每 500 帧打印一次日志
         
         logger.info(f"✅ VisionAgent 初始化完成！活跃视频源: {self._frame_manager.active_sources}")
-        logger.info(f"🔊 音频降噪器状态: {'已启用' if self._audio_denoiser.is_available else '未启用'}")
+        denoise_status = '已启用' if (audio_config.denoise_enabled and self._audio_denoiser.is_available) else '已禁用（节省CPU）'
+        logger.info(f"🔊 音频降噪器: {denoise_status}")
     
     # ========== 属性访问器（向后兼容） ==========
     
@@ -462,6 +472,12 @@ class VisionAgent(Agent):
         async def denoised_audio_stream() -> AsyncIterable[rtc.AudioFrame]:
             async for frame in audio:
                 try:
+                    # 跳帧处理：每 N 帧只处理一帧，其他帧直接返回
+                    self._denoise_frame_counter += 1
+                    if self._denoise_skip_frames > 1 and self._denoise_frame_counter % self._denoise_skip_frames != 0:
+                        yield frame
+                        continue
+                    
                     # 获取帧数据
                     frame_data = frame.data.tobytes()
                     sample_rate = frame.sample_rate
@@ -488,7 +504,7 @@ class VisionAgent(Agent):
                     # 定期记录日志
                     self._denoise_log_counter += 1
                     if self._denoise_log_counter % self._denoise_log_interval == 0:
-                        logger.debug(f"🔊 已处理 {self._denoise_log_counter} 帧音频（降噪中）")
+                        logger.debug(f"🔊 已处理 {self._denoise_log_counter} 帧音频（降噪中，跳帧={self._denoise_skip_frames}）")
                     
                     yield denoised_frame
                     
