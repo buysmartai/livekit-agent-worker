@@ -37,6 +37,11 @@ class BaseAPIClient(ABC):
             logger.error("❌ httpx 未安装，HTTP 功能不可用")
             return
         
+        # 🔍 排查日志：检查配置有效性
+        if not config.is_valid:
+            logger.error(f"❌ [排查] API 配置无效！base_url={config.base_url or '(空)'}, api_key={'已设置' if config.api_key else '(空)'}")
+            logger.error(f"❌ [排查] 请确保环境变量已正确设置")
+        
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(config.timeout, connect=3.0),
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),

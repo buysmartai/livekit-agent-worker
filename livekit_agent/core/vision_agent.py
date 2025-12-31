@@ -48,6 +48,12 @@ class VisionAgent(Agent):
         self._user_api = UserAPIClient(settings.chat_api)
         self._vision_api = VisionAPIClient(settings.vision_api)
         
+        # 🔍 排查日志：检查 ChatAPI 配置状态
+        logger.info(f"🔍 [排查] ChatAPI 可用性检查: is_available={self._chat_api.is_available}")
+        logger.info(f"🔍 [排查] ChatAPI 配置: base_url={settings.chat_api.base_url or '(空)'}, api_key={'已设置' if settings.chat_api.api_key else '(空)'}")
+        if not self._chat_api.is_available:
+            logger.error(f"❌ [排查] ChatAPI 不可用！请检查 CHAT_API_BASE_URL 和 CHAT_API_KEY 环境变量")
+        
         # 视频帧管理
         self._frame_manager = VideoFrameManager()
         
@@ -425,6 +431,10 @@ class VisionAgent(Agent):
                 logger.info("🧠 已添加预填充 Assistant 消息（跳过思考链）")
             else:
                 logger.warning("⚠️  未能获取动态 prompt，使用默认配置")
+        else:
+            # 🔍 排查日志：ChatAPI 不可用时记录详细原因
+            logger.error(f"❌ [排查] ChatAPI.is_available=False，跳过 getChatPrompt 调用！")
+            logger.error(f"❌ [排查] 请检查环境变量 CHAT_API_BASE_URL 和 CHAT_API_KEY 是否正确设置")
         
         # 3. 注入 visual_input_mode 说明（如果有屏幕分享）
         self._inject_visual_mode_instruction(chat_ctx)
