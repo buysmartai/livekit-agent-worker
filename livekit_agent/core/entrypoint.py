@@ -67,19 +67,31 @@ async def entrypoint(ctx: JobContext) -> None:
     # 5. 注册事件处理
     _register_event_handlers(session, agent)
     
-    # 6. 启动会话
+    # 🔍 [排查] 记录启动时序
+    import time
+    _start_time = time.time()
+    logger.info(f"🔍 [排查] 开始启动流程，时间戳={_start_time:.3f}")
+    
+    # 6. 先连接到房间（重要：必须先连接，再启动 Session，否则可能错过用户第一句话）
+    logger.info(f"🔍 [排查] 开始 ctx.connect()...")
+    await ctx.connect()
+    _connect_time = time.time()
+    logger.info(f"🔍 [排查] ctx.connect() 完成，耗时={(_connect_time - _start_time)*1000:.0f}ms")
+    
+    # 7. 启动会话（在房间连接后启动，确保 Agent 准备好接收用户输入）
+    logger.info(f"🔍 [排查] 开始 session.start()...")
     await session.start(agent=agent, room=ctx.room)
+    _session_time = time.time()
+    logger.info(f"🔍 [排查] session.start() 完成，耗时={(_session_time - _connect_time)*1000:.0f}ms")
     
     logger.info("=" * 80)
     logger.info(f"✅ AgentSession 已启动！")
     logger.info(f"🤖 使用的 Agent 类型: {type(agent).__name__}")
     logger.info(f"🎥 活跃视频源: {agent._frame_manager.active_sources}")
-    logger.info("=" * 80)
+    logger.info(f"🔍 [排查] 总启动耗时={(_session_time - _start_time)*1000:.0f}ms")
+    logger.info("="  * 80)
     
-    # 7. 连接到房间
-    await ctx.connect()
-    
-    # 7.1 读取并打印所有远程参与者的 attributes
+    # 8. 读取并打印所有远程参与者的 attributes
     logger.info("=" * 60)
     logger.info("📋 读取 Participant Attributes")
     logger.info("=" * 60)
@@ -101,7 +113,7 @@ async def entrypoint(ctx: JobContext) -> None:
     if not ctx.room.remote_participants:
         logger.info("⚠️  当前没有远程参与者，等待用户加入...")
     
-    # 7.2 监听新用户加入事件，读取其 attributes
+    # 8.1 监听新用户加入事件，读取其 attributes
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant):
         logger.info("=" * 60)
@@ -121,7 +133,7 @@ async def entrypoint(ctx: JobContext) -> None:
                 agent._user_context.timezone = participant.attributes["timezone"]
                 logger.info(f"✅ 已从 attributes 获取 timezone: {agent._user_context.timezone}")
     
-    # 7.3 监听 attributes 变化事件
+    # 8.2 监听 attributes 变化事件
     @ctx.room.on("participant_attributes_changed")
     def on_attributes_changed(changed_attributes: dict, participant):
         logger.info("=" * 60)
@@ -135,11 +147,11 @@ async def entrypoint(ctx: JobContext) -> None:
             agent._user_context.timezone = changed_attributes["timezone"]
             logger.info(f"✅ timezone 已更新: {agent._user_context.timezone}")
     
-    # 8. 设置视频轨道处理
+    # 9. 设置视频轨道处理
     setup_track_subscription(ctx.room, agent._frame_manager)
     process_existing_tracks(ctx.room, agent._frame_manager)
     
-    # 9. 启动屏幕帧上传器（每 3 秒上传一次屏幕分享帧）
+    # 10. 启动屏幕帧上传器（每 3 秒上传一次屏幕分享帧）
     screen_uploader = ScreenUploader(
         frame_manager=agent._frame_manager,
         user_context=agent._user_context,
@@ -147,26 +159,30 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     screen_uploader.start()
 
-    # 10. 调用 startVoiceChat API
+    # 11. 调用 startVoiceChat API
     chat_client = ChatAPIClient(agent._chat_api._config)
     await chat_client.start_voice_chat(agent._user_context)
 
     logger.info("Agent 已成功启动并连接到房间")
     
-    # 11. 监听房间断开事件，调用 completeVoiceChat
+    # 12. 监听房间断开事件，调用 completeVoiceChat
     async def _handle_room_disconnected():
         """处理房间断开事件"""
-        logger.info("🔌 房间已断开连接")
-        # 停止屏幕上传器
-        await screen_uploader.close()
-        # 调用 completeVoiceChat API
-        await chat_client.complete_voice_chat(agent._user_context)
-        await chat_client.close()
-        logger.info("✅ 已完成清理工作")
+        try:
+            logger.info("🔌 房间已断开连接")
+            # 停止屏幕上传器
+            await screen_uploader.close()
+            # 调用 completeVoiceChat API
+            await chat_client.complete_voice_chat(agent._user_context)
+            await chat_client.close()
+            logger.info("✅ 已完成清理工作")
+        except Exception as e:
+            logger.error(f"❌ [排查] 房间断开处理失败: {e}", exc_info=True)
     
     @ctx.room.on("disconnected")
     def on_room_disconnected():
-        asyncio.create_task(_handle_room_disconnected())
+        task = asyncio.create_task(_handle_room_disconnected())
+        task.add_done_callback(lambda t: t.exception() if t.done() and not t.cancelled() else None)
 
 
 def _register_event_handlers(session, agent: VisionAgent) -> None:
@@ -259,7 +275,8 @@ def _register_event_handlers(session, agent: VisionAgent) -> None:
     
     @session.on("conversation_item_added")
     def on_conversation_item_added(event: ConversationItemAddedEvent):
-        asyncio.create_task(_handle_conversation_item_added(event))
+        task = asyncio.create_task(_handle_conversation_item_added(event))
+        task.add_done_callback(lambda t: logger.error(f"❌ [排查] conversation_item_added 任务异常: {t.exception()}") if t.done() and not t.cancelled() and t.exception() else None)
     
     # 记录 TTS 是否已开始（避免重复记录）
     tts_started_for_turn = {"turn_id": 0}
